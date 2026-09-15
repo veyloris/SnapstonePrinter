@@ -1,9 +1,12 @@
 package com.example.snapstoneprinter.ui
 
+import android.app.Activity
+import android.app.Application
 import android.content.ComponentName
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Process
+import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.ComponentActivity
@@ -38,6 +41,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class PrintExternalReceiverTest {
@@ -50,11 +57,13 @@ class PrintExternalReceiverTest {
         val application = compose.activity.application
         runBlocking { PrinterTargetStore.remember(application, component) }
         lateinit var vm: ProxyGeneratorViewModel
+        lateinit var originalHost: ComponentActivity
         val bitmaps = listOf(Color.BLACK, Color.WHITE).map { color ->
             Bitmap.createBitmap(3, 2, Bitmap.Config.ARGB_8888).apply { eraseColor(color) }
         }
         try {
             compose.activityRule.scenario.onActivity { activity ->
+                originalHost = activity
                 val factory = object : ViewModelProvider.Factory {
                     override fun <T : ViewModel> create(modelClass: Class<T>): T = modelClass.cast(
                         ProxyGeneratorViewModel(application, CardRepository(object : ScryfallApiService {
@@ -98,12 +107,8 @@ class PrintExternalReceiverTest {
                 if (index == 0) {
                     val retained = vm
                     val token = (vm.uiState.value.printJob as PrintJobState.Launched).token
-                    compose.activityRule.scenario.recreate()
-                    compose.activityRule.scenario.onActivity { activity ->
-                        vm = ViewModelProvider(activity)[ProxyGeneratorViewModel::class.java]
-                        assertSame(retained, vm)
-                        activity.setContent { Host(vm) }
-                    }
+                    val recreatedHost = recreateBehindReceiver(originalHost, retained)
+                    assertNotSame(originalHost, recreatedHost)
                     val afterRecreation = JSONObject(awaitNode {
                         it.contentDescription == "print-receiver-receipt"
                     }.text.toString())
@@ -145,6 +150,51 @@ class PrintExternalReceiverTest {
             node(instrumentation.uiAutomation.rootInActiveWindow) { it.text == "Return Cancel" }
                 ?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             runBlocking { PrinterTargetStore.forget(application) }
+        }
+    }
+
+    private fun recreateBehindReceiver(original: ComponentActivity, retained: ProxyGeneratorViewModel): ComponentActivity {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val ready = CountDownLatch(1)
+        val recreated = AtomicReference<ComponentActivity>()
+        val destroyed = AtomicBoolean(false)
+        val failure = AtomicReference<Throwable>()
+        val callbacks = object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityPostCreated(activity: Activity, savedInstanceState: Bundle?) {
+                if (activity === original || activity.javaClass != original.javaClass) return
+                try {
+                    val host = activity as ComponentActivity
+                    assertSame(retained, ViewModelProvider(host)[ProxyGeneratorViewModel::class.java])
+                    host.setContent { Host(retained) }
+                    recreated.set(host)
+                } catch (problem: Throwable) {
+                    failure.set(problem)
+                } finally {
+                    ready.countDown()
+                }
+            }
+            override fun onActivityDestroyed(activity: Activity) {
+                if (activity === original) destroyed.set(true)
+            }
+            override fun onActivityCreated(activity: Activity, state: Bundle?) = Unit
+            override fun onActivityStarted(activity: Activity) = Unit
+            override fun onActivityResumed(activity: Activity) = Unit
+            override fun onActivityPaused(activity: Activity) = Unit
+            override fun onActivityStopped(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) = Unit
+        }
+        try {
+            instrumentation.runOnMainSync {
+                original.application.registerActivityLifecycleCallbacks(callbacks)
+                original.recreate()
+            }
+            assertTrue("Host recreation was deferred or failed while the receiver stayed open",
+                ready.await(15, TimeUnit.SECONDS))
+            failure.get()?.let { throw AssertionError("Could not attach recreated host", it) }
+            assertTrue("Original host must be destroyed before replacement", destroyed.get())
+            return checkNotNull(recreated.get())
+        } finally {
+            instrumentation.runOnMainSync { original.application.unregisterActivityLifecycleCallbacks(callbacks) }
         }
     }
 
