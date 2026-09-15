@@ -47,7 +47,7 @@ import java.util.concurrent.TimeUnit
  * half a second from an emulator, and Coil's default OkHttp client is tuned for thumbnails, not
  * for a blocking step in a print pipeline.
  */
-class ArtDownloader(context: Context) {
+class ArtDownloader(context: Context) : ArtSource {
 
     private val appContext = context.applicationContext
 
@@ -80,7 +80,7 @@ class ArtDownloader(context: Context) {
             .build()
     }
 
-    suspend fun fetch(url: String): ArtResult = withContext(Dispatchers.IO) {
+    override suspend fun fetch(url: String): ArtResult = withContext(Dispatchers.IO) {
         val request = ImageRequest.Builder(appContext)
             .data(url)
             // MUST stay false: a HARDWARE-config bitmap cannot be read pixel-by-pixel, and the
@@ -88,7 +88,7 @@ class ArtDownloader(context: Context) {
             .allowHardware(false)
             .allowRgb565(false)
             .bitmapConfig(Bitmap.Config.ARGB_8888)
-            // Dither the art at its native resolution, not at the display's size resolver guess.
+            // Keep original source pixels available for later tone adjustments.
             .size(Size.ORIGINAL)
             .memoryCachePolicy(CachePolicy.ENABLED)
             .diskCachePolicy(CachePolicy.ENABLED)

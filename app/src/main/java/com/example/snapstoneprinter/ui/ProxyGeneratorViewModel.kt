@@ -13,10 +13,14 @@ import com.example.snapstoneprinter.data.print.PrinterTargetStore
 import com.example.snapstoneprinter.data.repository.CardRepository
 import com.example.snapstoneprinter.image.ArtDownloader
 import com.example.snapstoneprinter.image.ArtResult
+import com.example.snapstoneprinter.image.ArtSource
+import com.example.snapstoneprinter.image.AndroidSlipRenderer
 import com.example.snapstoneprinter.image.ImageProcessor
 import com.example.snapstoneprinter.image.PrintSlip
 import com.example.snapstoneprinter.image.SlipContent
 import com.example.snapstoneprinter.image.SlipPlanner
+import com.example.snapstoneprinter.image.SlipRenderer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -73,6 +77,8 @@ data class SlipDispatch(
     val total: Int get() = uris.size
 }
 
+data class ToneSettings(val contrast: Float, val brightness: Float)
+
 data class ProxyGeneratorUiState(
     val currentCard: ScryfallCard? = null,
     /**
@@ -95,7 +101,10 @@ data class ProxyGeneratorUiState(
     val history: List<HistoryEntry> = emptyList(),
     val dispatch: SlipDispatch? = null,
     /** The remembered printer app, or null when the chooser should be shown. */
-    val printerTarget: PrinterTarget? = null
+    val printerTarget: PrinterTarget? = null,
+    val currentPullId: Long? = null,
+    val appliedTone: ToneSettings? = null,
+    val renderError: String? = null
 ) {
     /** First slip - the front face. Convenience for the interim single-preview UI. */
     val primarySlip: PrintSlip?
@@ -109,7 +118,7 @@ data class ProxyGeneratorUiState(
         get() = slips.size > 1
 
     val canPrint: Boolean
-        get() = !isLoading && slips.isNotEmpty()
+        get() = !isLoading && !isRedithering && slips.isNotEmpty()
 
     val isToneMappingNeutral: Boolean
         get() = contrast == ImageProcessor.DEFAULT_CONTRAST &&
@@ -125,25 +134,27 @@ data class ProxyGeneratorUiState(
  */
 class ProxyGeneratorViewModel(
     application: Application,
-    private val repository: CardRepository
+    private val repository: CardRepository,
+    private val artSource: ArtSource = ArtDownloader(application),
+    private val slipRenderer: SlipRenderer = AndroidSlipRenderer()
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(ProxyGeneratorUiState())
     val uiState: StateFlow<ProxyGeneratorUiState> = _uiState.asStateFlow()
 
-    private val artDownloader = ArtDownloader(application)
+    private data class DownloadedBundle(
+        val generation: Long,
+        val card: ScryfallCard,
+        val plan: List<SlipContent>,
+        val art: List<Bitmap?>,
+        val artWarning: String?
+    )
 
-    /**
-     * The UNDITHERED art for the current pull, one entry per slip.
-     *
-     * This is what makes the tone sliders cheap: changing contrast re-runs Floyd-Steinberg over
-     * this cached source, never a second network fetch.
-     */
-    private var sourceArt: List<Bitmap?> = emptyList()
-    private var currentPlan: List<SlipContent> = emptyList()
-
-    /** Debounce handle for the tone sliders, so a drag does not queue a dither per frame. */
-    private var reditherJob: Job? = null
+    private var activeGeneration = 0L
+    private var toneRevision = 0L
+    private var downloadedBundle: DownloadedBundle? = null
+    private var generationJob: Job? = null
+    private var renderJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -167,51 +178,85 @@ class ProxyGeneratorViewModel(
 
     /** Pre-dither contrast multiplier. Triggers a debounced re-dither of the CACHED source art. */
     fun setContrast(value: Float) {
-        _uiState.update { it.copy(contrast = value.coerceIn(MIN_CONTRAST, MAX_CONTRAST)) }
-        scheduleRedither()
+        requestTone(ToneSettings(value.coerceIn(MIN_CONTRAST, MAX_CONTRAST), _uiState.value.brightness))
     }
 
     /** Pre-dither brightness offset. Triggers a debounced re-dither of the CACHED source art. */
     fun setBrightness(value: Float) {
-        _uiState.update { it.copy(brightness = value.coerceIn(MIN_BRIGHTNESS, MAX_BRIGHTNESS)) }
-        scheduleRedither()
+        requestTone(ToneSettings(_uiState.value.contrast, value.coerceIn(MIN_BRIGHTNESS, MAX_BRIGHTNESS)))
     }
 
     /** Restores neutral tone-mapping, i.e. auto-levels only. */
     fun resetToneMapping() {
-        _uiState.update {
-            it.copy(
-                contrast = ImageProcessor.DEFAULT_CONTRAST,
-                brightness = ImageProcessor.DEFAULT_BRIGHTNESS
-            )
-        }
-        scheduleRedither()
+        requestTone(ToneSettings(ImageProcessor.DEFAULT_CONTRAST, ImageProcessor.DEFAULT_BRIGHTNESS))
     }
 
-    /**
-     * Coalesces slider movement into one re-dither.
-     *
-     * Floyd-Steinberg is a serial O(w*h) pass over a ~600x450 image plus a full slip recomposition.
-     * At 60 drag events per second that is unshippable, so each change cancels the pending job and
-     * restarts a [REDITHER_DEBOUNCE_MS] timer. The last value wins.
-     */
-    private fun scheduleRedither() {
-        if (currentPlan.isEmpty()) return
-        reditherJob?.cancel()
-        reditherJob = viewModelScope.launch {
-            delay(REDITHER_DEBOUNCE_MS)
-            _uiState.update { it.copy(isRedithering = true) }
+    private fun requestTone(tone: ToneSettings) {
+        toneRevision += 1
+        renderJob?.cancel()
+        val bundle = downloadedBundle
+        _uiState.update {
+            it.copy(
+                contrast = tone.contrast, brightness = tone.brightness, renderError = null,
+                isRedithering = bundle != null && it.currentPullId == bundle.generation
+            )
+        }
+        bundle?.let { startRender(it, debounce = true) }
+    }
+
+    private fun ownsRender(generation: Long, revision: Long): Boolean =
+        generation == activeGeneration && revision == toneRevision
+
+    private fun startRender(bundle: DownloadedBundle, debounce: Boolean) {
+        renderJob?.cancel()
+        val revision = toneRevision
+        val tone = ToneSettings(_uiState.value.contrast, _uiState.value.brightness)
+        _uiState.update {
+            val hasPreview = it.currentPullId == bundle.generation
+            it.copy(isLoading = !hasPreview, isRedithering = hasPreview, renderError = null)
+        }
+        renderJob = viewModelScope.launch {
             try {
-                val state = _uiState.value
-                val plan = currentPlan
-                val art = sourceArt
-                val slips = withContext(Dispatchers.Default) {
-                    composeFrom(plan, art, state.contrast, state.brightness)
+                if (debounce) delay(REDITHER_DEBOUNCE_MS)
+                val slips = slipRenderer.render(bundle.plan, bundle.art, tone.contrast, tone.brightness)
+                if (!ownsRender(bundle.generation, revision)) return@launch
+                require(slips.isNotEmpty() && slips.size == bundle.plan.size) {
+                    "Renderer must return one nonempty result per planned slip"
                 }
-                _uiState.update { it.copy(slips = slips, isRedithering = false) }
+                _uiState.update { state ->
+                    val history = if (state.currentPullId == bundle.generation) {
+                        state.history.map { entry ->
+                            if (entry.id == bundle.generation) entry.copy(slips = slips) else entry
+                        }
+                    } else {
+                        state.history.prepended(
+                            HistoryEntry(bundle.generation, bundle.card.effectiveName, bundle.card.effectiveTypeLine, slips)
+                        )
+                    }
+                    state.copy(
+                        currentCard = bundle.card, slips = slips, currentPullId = bundle.generation,
+                        appliedTone = tone, history = history, isLoading = false, isRedithering = false,
+                        error = null, renderError = null, artError = bundle.artWarning
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Re-dither failed", e)
-                _uiState.update { it.copy(isRedithering = false) }
+                if (!ownsRender(bundle.generation, revision)) return@launch
+                Log.e(TAG, "Slip render failed", e)
+                val state = _uiState.value
+                val applied = state.appliedTone
+                if (state.currentPullId == bundle.generation && applied != null) {
+                    _uiState.update {
+                        it.copy(
+                            contrast = applied.contrast, brightness = applied.brightness,
+                            isLoading = false, isRedithering = false, error = null,
+                            renderError = "Could not apply tone changes. Previous preview and settings kept."
+                        )
+                    }
+                } else {
+                    failInitialGeneration(e.message ?: "Unknown error")
+                }
             }
         }
     }
@@ -222,15 +267,17 @@ class ProxyGeneratorViewModel(
 
     /** Always excludes lands - see [CardRepository.getRandomCard]. */
     fun fetchRandomCard() {
+        val isFunny = _uiState.value.isFunny
         generateProxy(notFoundMessage = "No random card found - try again") {
-            repository.getRandomCard(_uiState.value.isFunny)
+            repository.getRandomCard(isFunny)
         }
     }
 
     /** MomirVig mode: a random creature of [cmc] - see [CardRepository.getMomirVigCreature]. */
     fun fetchMomirVigCreature(cmc: Int) {
+        val isFunny = _uiState.value.isFunny
         generateProxy(notFoundMessage = "No creature found at CMC $cmc") {
-            repository.getMomirVigCreature(cmc, _uiState.value.isFunny)
+            repository.getMomirVigCreature(cmc, isFunny)
         }
     }
 
@@ -250,14 +297,22 @@ class ProxyGeneratorViewModel(
     }
 
     private fun generateProxy(notFoundMessage: String, fetchBlock: suspend () -> ScryfallCard) {
-        reditherJob?.cancel()
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(isLoading = true, error = null, artError = null, slips = emptyList())
-            }
+        activeGeneration += 1
+        toneRevision += 1
+        val generation = activeGeneration
+        generationJob?.cancel()
+        renderJob?.cancel()
+        downloadedBundle = null
+        _uiState.update {
+            it.copy(
+                isLoading = true, isRedithering = false, currentCard = null, slips = emptyList(),
+                currentPullId = null, appliedTone = null, error = null, artError = null, renderError = null
+            )
+        }
+        generationJob = viewModelScope.launch {
             try {
                 val card = fetchBlock()
-                _uiState.update { it.copy(currentCard = card) }
+                if (generation != activeGeneration) return@launch
 
                 // One entry per slip. A true DFC plans two, each pointing at its OWN face art;
                 // split/flip/adventure plan a single slip off the shared top-level image_uris.
@@ -271,7 +326,7 @@ class ProxyGeneratorViewModel(
                         failures += "${content.name}: Scryfall listed no art URL"
                         null
                     } else {
-                        when (val result = artDownloader.fetch(url)) {
+                        when (val result = artSource.fetch(url)) {
                             is ArtResult.Success -> result.bitmap
                             is ArtResult.Failure -> {
                                 failures += "${content.name}: ${result.reason}"
@@ -281,59 +336,37 @@ class ProxyGeneratorViewModel(
                     }
                 }
 
-                currentPlan = plan
-                sourceArt = art
-
-                val state = _uiState.value
-                val slips = withContext(Dispatchers.Default) {
-                    composeFrom(plan, art, state.contrast, state.brightness)
-                }
-
-                _uiState.update {
-                    it.copy(
-                        slips = slips,
-                        isLoading = false,
-                        artError = failures.takeIf { f -> f.isNotEmpty() }
-                            ?.joinToString("; ")
-                            ?.let { reason -> "Art unavailable - printing text only ($reason)" },
-                        history = it.history.prepended(
-                            HistoryEntry(
-                                id = System.currentTimeMillis(),
-                                cardName = card.effectiveName,
-                                typeLine = card.effectiveTypeLine,
-                                slips = slips
-                            )
-                        )
-                    )
-                }
+                if (generation != activeGeneration) return@launch
+                val bundle = DownloadedBundle(
+                    generation, card, plan.toList(), art.toList(),
+                    failures.takeIf { it.isNotEmpty() }?.joinToString("; ")
+                        ?.let { reason -> "Art unavailable - printing text only ($reason)" }
+                )
+                downloadedBundle = bundle
+                startRender(bundle, debounce = false)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                if (generation != activeGeneration) return@launch
                 Log.e(TAG, "Proxy generation failed", e)
                 val message = if (e is HttpException && e.code() == 404) {
                     notFoundMessage
                 } else {
                     e.message ?: "Unknown error"
                 }
-                _uiState.update { it.copy(isLoading = false, error = message) }
+                failInitialGeneration(message)
             }
         }
     }
 
-    private fun composeFrom(
-        plan: List<SlipContent>,
-        art: List<Bitmap?>,
-        contrast: Float,
-        brightness: Float
-    ): List<PrintSlip> {
-        val dithered = art.map { source ->
-            source?.let {
-                ImageProcessor.prepareArt(
-                    src = it,
-                    contrast = contrast,
-                    brightness = brightness
-                )
-            }
+    private fun failInitialGeneration(message: String) {
+        downloadedBundle = null
+        _uiState.update {
+            it.copy(
+                isLoading = false, isRedithering = false, currentCard = null, slips = emptyList(),
+                currentPullId = null, appliedTone = null, error = message, renderError = null, artError = null
+            )
         }
-        return ImageProcessor.composeSlips(plan, dithered)
     }
 
     private fun List<HistoryEntry>.prepended(entry: HistoryEntry): List<HistoryEntry> =
@@ -346,12 +379,24 @@ class ProxyGeneratorViewModel(
     /** Queues EVERY slip of the current card for sequential dispatch. */
     fun printCurrentCard() {
         val state = _uiState.value
+        if (!state.canPrint || state.dispatch != null) return
         dispatchSlips(state.slips, state.currentCard?.effectiveName ?: "Proxy")
     }
 
     /** Re-dispatches a past pull straight from its cached bitmaps - no network, no re-dither. */
     fun reprint(entry: HistoryEntry) {
-        dispatchSlips(entry.slips, entry.cardName)
+        tryReprint(entry)
+    }
+
+    internal fun resolveHistoryEntry(id: Long): HistoryEntry? = _uiState.value.history.firstOrNull { it.id == id }
+
+    fun tryReprint(entry: HistoryEntry): Boolean {
+        val state = _uiState.value
+        if (state.dispatch != null ||
+            (entry.id == state.currentPullId && (state.isLoading || state.isRedithering))) return false
+        val current = resolveHistoryEntry(entry.id) ?: return false
+        dispatchSlips(current.slips, current.cardName)
+        return true
     }
 
     private fun dispatchSlips(slips: List<PrintSlip>, label: String) {
@@ -416,7 +461,7 @@ class ProxyGeneratorViewModel(
     }
 
     fun clearError() {
-        _uiState.update { it.copy(error = null, artError = null) }
+        _uiState.update { it.copy(error = null, artError = null, renderError = null) }
     }
 
     // ------------------------------------------------------------------

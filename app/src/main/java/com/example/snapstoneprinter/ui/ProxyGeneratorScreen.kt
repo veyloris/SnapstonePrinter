@@ -86,6 +86,7 @@ fun ProxyGeneratorScreen(
 
     var showToneSheet by remember { mutableStateOf(false) }
     var showHistorySheet by remember { mutableStateOf(false) }
+    var historyError by remember { mutableStateOf<String?>(null) }
     var showSearchSheet by remember { mutableStateOf(false) }
     var showMomirVigSheet by remember { mutableStateOf(false) }
     var appMode by remember { mutableStateOf(AppMode.SNAPSTONE_WIELDER) }
@@ -158,7 +159,7 @@ fun ProxyGeneratorScreen(
                 onFetchRandom = onRoll,
                 onToggleFunny = viewModel::toggleIsFunny,
                 onOpenTone = { showToneSheet = true },
-                onOpenHistory = { showHistorySheet = true },
+                onOpenHistory = { historyError = null; showHistorySheet = true },
                 onOpenSearch = { showSearchSheet = true },
                 onForgetTarget = viewModel::forgetPrinterTarget
             )
@@ -267,10 +268,15 @@ fun ProxyGeneratorScreen(
         HistorySheet(
             history = uiState.history,
             onReprint = {
-                showHistorySheet = false
-                viewModel.reprint(it)
+                historyError = null
+                if (viewModel.tryReprint(it)) {
+                    showHistorySheet = false
+                } else {
+                    historyError = "This item is unavailable or busy. Wait for current work to finish and try again."
+                }
             },
-            onDismiss = { showHistorySheet = false }
+            onDismiss = { historyError = null; showHistorySheet = false },
+            error = historyError
         )
     }
 
@@ -698,6 +704,7 @@ fun ProxyPreview(
                     },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    uiState.renderError?.let { RenderErrorNotice(it, Modifier.padding(12.dp)) }
                     if (uiState.slips.size > 1) {
                         MultiSlipHeader(
                             slips = uiState.slips,

@@ -55,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -119,6 +120,7 @@ fun InlineToneControls(
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
+        uiState.renderError?.let { RenderErrorNotice(it) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "Dither tone",
@@ -169,6 +171,16 @@ fun InlineToneControls(
             Text("Reset to auto-levels")
         }
     }
+}
+
+@Composable
+internal fun RenderErrorNotice(message: String, modifier: Modifier = Modifier) {
+    Text(
+        text = message,
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodySmall,
+        modifier = modifier
+    )
 }
 
 @Composable
@@ -414,7 +426,8 @@ private fun CmcTile(cmc: Int, enabled: Boolean, onClick: () -> Unit) {
 fun HistorySheet(
     history: List<HistoryEntry>,
     onReprint: (HistoryEntry) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    error: String? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -437,6 +450,7 @@ fun HistorySheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(8.dp))
+            error?.let { RenderErrorNotice(it) }
 
             if (history.isEmpty()) {
                 Text(
@@ -460,7 +474,8 @@ fun HistorySheet(
 
 @Composable
 private fun HistoryRow(entry: HistoryEntry, onReprint: () -> Unit) {
-    val thumbnail = remember(entry.id) { entry.slips.firstOrNull()?.bitmap?.asImageBitmap() }
+    val bitmap = entry.slips.firstOrNull()?.bitmap
+    val thumbnail = remember(bitmap) { bitmap?.asImageBitmap() }
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -474,6 +489,7 @@ private fun HistoryRow(entry: HistoryEntry, onReprint: () -> Unit) {
                 bitmap = thumbnail,
                 contentDescription = null,
                 modifier = Modifier
+                    .testTag("history-thumbnail-${entry.id}")
                     .size(44.dp, 56.dp)
                     .clip(MaterialTheme.shapes.small)
                     .background(Color.White),
