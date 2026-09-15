@@ -1,6 +1,6 @@
 # SnapstonePrinter: card correctness and predictable printing
 
-Created: 2026-09-15. State: started; Step 1 local implementation and checks complete per the companion appendix, pending independent review and hosted verification.
+Created: 2026-09-15. State: complete; see the [final acceptance record](2026-09-15-print-integration-evidence.md#final-core-acceptance--2026-09-15) for merged PR8 and passing checks at `5085ee0`. Steps 1–4 and 6 were delivered in [PR4](https://github.com/veyloris/SnapstonePrinter/pull/4), [PR6](https://github.com/veyloris/SnapstonePrinter/pull/6), [PR5](https://github.com/veyloris/SnapstonePrinter/pull/5), [PR7](https://github.com/veyloris/SnapstonePrinter/pull/7), and [PR9](https://github.com/veyloris/SnapstonePrinter/pull/9), respectively; Step5 was delivered in [PR8](https://github.com/veyloris/SnapstonePrinter/pull/8). Preserve the original premises and executor instructions below as the historical implementation contract; consult the final record for current acceptance instead of earlier pending statements.
 
 ## Premises
 
@@ -30,7 +30,7 @@ For later state work, use explicit generation/render revisions and injected rend
 
 ## Ordered executor steps
 
-### Step 1 — funny-card pool semantics (local execution complete; review and hosted checks pending)
+### Step 1 — funny-card pool semantics
 
 Scope files: `data/api/ScryfallQueryBuilder.kt`, `src/test/.../data/api/ScryfallQueryBuilderTest.kt`, existing `CardRepositoryTest.kt`, and this plan/appendix at `docs/migrations/2026-09-15-card-print-correctness{,-appendix}.md` when the main thread creates the first branch. All abbreviated source paths are under `app/src/main/java/com/example/snapstoneprinter/`; test paths use the same package below their source set.
 
@@ -38,7 +38,7 @@ Keep signatures `build(isFunny: Boolean = false): String` and `buildMomirVig(cmc
 
 TDD: add `snapstoneOffExcludesFunny`, `snapstoneOnIncludesOrdinaryAndFunnyPool`, `momirOffExcludesFunny`, `momirOnPreservesCreatureAndCmc`, `invalidCmcRejectsBeforeApiCall` with exact query assertions and invalid -1/17 boundaries; cover 0/16 valid boundaries. Update repository query expectations only after seeing those assertions fail against P1. Run targeted unit tests, then the existing build/lint/unit command. Never implement a test-side approximation of the whole Scryfall query language; exact emitted query assertions plus measured examples are the intended coverage.
 
-### Step 2 — face-correct card statistics (ready after Step 1)
+### Step 2 — face-correct card statistics
 
 Scope `ScryfallCard.kt`, `SlipPlanner.kt`, `ImageProcessor.kt`, Moshi/model/planner tests and fixtures. Add `val loyalty: String? = null` and `val defense: String? = null` to both API card and face models and both `SlipContent` and `SecondaryFace` (append defaulted fields to preserve call sites). Add effective top-level-first nullable resolvers for legacy non-face access if used by single-card planning; do not fall back from one face's missing statistic into another face or aggregate card field.
 

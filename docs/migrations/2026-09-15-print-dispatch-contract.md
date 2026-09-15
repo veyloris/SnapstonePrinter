@@ -1,6 +1,6 @@
 # Print dispatch: explicit continuation and request ownership
 
-Created: 2026-09-15. State: started (Pass A); see the companion coordinator evidence record for local verification and pending hosted/integration checks.
+Created: 2026-09-15. State: complete; Passes A and B were delivered in [PR8](https://github.com/veyloris/SnapstonePrinter/pull/8), merged as `4a4c4ea`. The [final acceptance record](2026-09-15-print-integration-evidence.md#final-core-acceptance--2026-09-15) anchors passing hosted runtime and build checks at `5085ee0`. Preserve the premises, implementation instructions, and earlier unverified statements below as historical planning context; the final record supersedes their pending acceptance status.
 
 ## Premises
 
