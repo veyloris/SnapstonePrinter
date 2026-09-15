@@ -117,3 +117,23 @@ on failure, successful-build APK upload, and artifact retention against Step 1.
 
 Unverified: independent/security review and hosted SDK provisioning, checks, and artifacts
 remain with the main thread. Emulator and physical printer checks were not run in Step 1.
+
+### Hosted SDK setup correction — 2026-09-15
+
+Inherited from the main thread's `gh run view 34998605327 --log-failed`: the
+[first hosted run](https://github.com/veyloris/SnapstonePrinter/actions/runs/34998605327)
+failed in Android SDK setup because setup-android v3's default package list requested
+the unavailable `tools` package; `sdkmanager` returned exit 1.
+
+Set `packages: platform-tools` explicitly to avoid requesting that obsolete package.
+Set `cmdline-tools-version: '15859902'` to match the main thread's inherited report of
+the locally checksum-verified SDK tools, and disable accepted-license log output.
+Keep platform and build-tools installation in the following explicit provisioning step.
+
+Measured 2026-09-15 after this correction:
+`go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/ci.yml`
+returned exit 0 with no diagnostics; output log:
+`/tmp/snapstone-step1-actionlint-sdk-fix.log`.
+
+Unverified: the corrected hosted run remains with the main thread; do not treat local
+workflow lint as proof that SDK provisioning succeeds on the hosted runner.
