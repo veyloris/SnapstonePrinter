@@ -110,7 +110,7 @@ class ProxyGeneratorRenderOwnershipTest {
         assertFalse(fixture.state.canPrint)
         assertFalse(fixture.vm.tryReprint(currentEntry))
         fixture.vm.printCurrentCard()
-        assertNull(fixture.state.dispatch)
+        assertFalse(fixture.state.printJob.isBusy)
         assertTrue("different completed entries stay eligible", fixture.vm.tryReprint(oldEntry))
     }
 
@@ -216,7 +216,7 @@ class ProxyGeneratorRenderOwnershipTest {
         assertNull(fixture.vm.resolveHistoryEntry(old.id))
         assertFalse(fixture.vm.tryReprint(old))
         fixture.vm.reprint(old)
-        assertNull(fixture.state.dispatch)
+        assertFalse(fixture.state.printJob.isBusy)
     }
 
     @Test

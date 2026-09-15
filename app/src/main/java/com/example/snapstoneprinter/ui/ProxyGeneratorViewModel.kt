@@ -2,14 +2,20 @@ package com.example.snapstoneprinter.ui
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.net.Uri
 import android.util.Log
-import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.snapstoneprinter.data.model.ScryfallCard
 import com.example.snapstoneprinter.data.print.PrinterTarget
 import com.example.snapstoneprinter.data.print.PrinterTargetStore
+import com.example.snapstoneprinter.data.print.AndroidSlipExporter
+import com.example.snapstoneprinter.data.print.DispatchToken
+import com.example.snapstoneprinter.data.print.ExportedSlips
+import com.example.snapstoneprinter.data.print.LaunchRequest
+import com.example.snapstoneprinter.data.print.PrintJobCoordinator
+import com.example.snapstoneprinter.data.print.PrintJobState
+import com.example.snapstoneprinter.data.print.SlipExporter
+import com.example.snapstoneprinter.data.print.StartPrintResult
 import com.example.snapstoneprinter.data.repository.CardRepository
 import com.example.snapstoneprinter.image.ArtDownloader
 import com.example.snapstoneprinter.image.ArtResult
@@ -21,7 +27,8 @@ import com.example.snapstoneprinter.image.SlipContent
 import com.example.snapstoneprinter.image.SlipPlanner
 import com.example.snapstoneprinter.image.SlipRenderer
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,9 +37,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import retrofit2.HttpException
-import java.io.File
-import java.io.FileOutputStream
 
 /** Which image the preview pane is showing. The PRINTED output is always the thermal composite. */
 enum class PreviewMode {
@@ -58,25 +64,6 @@ data class HistoryEntry(
     val slipCount: Int get() = slips.size
 }
 
-/**
- * An in-flight print job.
- *
- * Slips are dispatched STRICTLY ONE AT A TIME: [index] only advances once the previous
- * `ACTION_SEND` activity has returned. `ACTION_SEND_MULTIPLE` is deliberately never used - the
- * cheap Bluetooth thermal printer apps this targets handle multi-stream sends badly, dropping or
- * interleaving images.
- */
-data class SlipDispatch(
-    val requestId: Long,
-    val uris: List<Uri>,
-    val index: Int,
-    val label: String
-) {
-    val current: Uri get() = uris[index]
-    val hasNext: Boolean get() = index + 1 < uris.size
-    val total: Int get() = uris.size
-}
-
 data class ToneSettings(val contrast: Float, val brightness: Float)
 
 data class ProxyGeneratorUiState(
@@ -99,7 +86,7 @@ data class ProxyGeneratorUiState(
     val isRedithering: Boolean = false,
     val previewMode: PreviewMode = PreviewMode.THERMAL,
     val history: List<HistoryEntry> = emptyList(),
-    val dispatch: SlipDispatch? = null,
+    val printJob: PrintJobState = PrintJobState.Idle,
     /** The remembered printer app, or null when the chooser should be shown. */
     val printerTarget: PrinterTarget? = null,
     val currentPullId: Long? = null,
@@ -136,7 +123,8 @@ class ProxyGeneratorViewModel(
     application: Application,
     private val repository: CardRepository,
     private val artSource: ArtSource = ArtDownloader(application),
-    private val slipRenderer: SlipRenderer = AndroidSlipRenderer()
+    private val slipRenderer: SlipRenderer = AndroidSlipRenderer(),
+    private val slipExporter: SlipExporter = AndroidSlipExporter(application)
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(ProxyGeneratorUiState())
@@ -155,6 +143,10 @@ class ProxyGeneratorViewModel(
     private var downloadedBundle: DownloadedBundle? = null
     private var generationJob: Job? = null
     private var renderJob: Job? = null
+    private val printCoordinator = PrintJobCoordinator()
+    private var exportJob: Job? = null
+    private data class OwnedBatch(val batch: ExportedSlips, var claimed: Boolean = false)
+    private var ownedBatch: OwnedBatch? = null
 
     init {
         viewModelScope.launch {
@@ -379,8 +371,8 @@ class ProxyGeneratorViewModel(
     /** Queues EVERY slip of the current card for sequential dispatch. */
     fun printCurrentCard() {
         val state = _uiState.value
-        if (!state.canPrint || state.dispatch != null) return
-        dispatchSlips(state.slips, state.currentCard?.effectiveName ?: "Proxy")
+        if (!state.canPrint) return
+        startPrint(state.slips, state.currentCard?.effectiveName ?: "Proxy")
     }
 
     /** Re-dispatches a past pull straight from its cached bitmaps - no network, no re-dither. */
@@ -392,57 +384,95 @@ class ProxyGeneratorViewModel(
 
     fun tryReprint(entry: HistoryEntry): Boolean {
         val state = _uiState.value
-        if (state.dispatch != null ||
-            (entry.id == state.currentPullId && (state.isLoading || state.isRedithering))) return false
+        if (entry.id == state.currentPullId && (state.isLoading || state.isRedithering)) return false
         val current = resolveHistoryEntry(entry.id) ?: return false
-        dispatchSlips(current.slips, current.cardName)
+        return startPrint(current.slips, current.cardName)
+    }
+
+    private fun publishPrintJob() {
+        _uiState.update { it.copy(printJob = printCoordinator.state.value) }
+    }
+
+    private fun startPrint(slips: List<PrintSlip>, label: String): Boolean {
+        val snapshot = slips.toList()
+        val started = printCoordinator.start(label, snapshot.size) as? StartPrintResult.Started ?: return false
+        val jobId = started.jobId
+        ownedBatch = null
+        publishPrintJob()
+        exportJob = viewModelScope.launch {
+            try {
+                val batch = slipExporter.export(jobId, snapshot)
+                if (batch.jobId != jobId) {
+                    Log.e(TAG, "Exporter returned a batch belonging to a different print job")
+                    printCoordinator.exportFailed(jobId, "Could not prepare images for this print job.")
+                    publishPrintJob()
+                    return@launch
+                }
+                printCoordinator.exported(jobId, batch.uris)
+                val ready = printCoordinator.state.value as? PrintJobState.Ready
+                val accepted = ready?.jobId == jobId
+                // Establish ownership before Ready can trigger the host's synchronous claim.
+                if (accepted) ownedBatch = OwnedBatch(batch)
+                publishPrintJob()
+                if (!accepted) discardUnshared(batch)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to cache slips for sharing", e)
+                printCoordinator.exportFailed(jobId, "Could not save images for sharing.")
+                publishPrintJob()
+            }
+        }
         return true
     }
 
-    private fun dispatchSlips(slips: List<PrintSlip>, label: String) {
-        if (slips.isEmpty()) return
-        viewModelScope.launch {
+    fun claimPrintLaunch(token: DispatchToken): LaunchRequest? {
+        val request = printCoordinator.claimLaunch(token)
+        if (request != null) ownedBatch?.takeIf { it.batch.jobId == token.jobId }?.claimed = true
+        publishPrintJob()
+        return request
+    }
+
+    fun onPrintReturned(token: DispatchToken) {
+        printCoordinator.returned(token)
+        publishPrintJob()
+    }
+
+    fun onPrintLaunchFailed(token: DispatchToken, message: String) {
+        printCoordinator.launchFailed(token, message)
+        publishPrintJob()
+    }
+
+    fun sendNextSlip(jobId: String) {
+        printCoordinator.sendNext(jobId)
+        publishPrintJob()
+    }
+
+    fun stopPrinting(jobId: String) {
+        val previous = printCoordinator.state.value
+        if (!printCoordinator.stop(jobId)) return
+        if (previous is PrintJobState.Preparing) exportJob?.cancel()
+        val unshared = ownedBatch?.takeIf { it.batch.jobId == jobId && !it.claimed }
+        if (unshared != null) {
+            ownedBatch = null
+            viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) { discardUnshared(unshared.batch) }
+        }
+        publishPrintJob()
+    }
+
+    private suspend fun discardUnshared(batch: ExportedSlips) {
+        withContext(NonCancellable) {
             try {
-                val uris = withContext(Dispatchers.IO) {
-                    val dir = cacheImagesDir()
-                    val stamp = System.currentTimeMillis()
-                    slips.mapIndexed { index, slip -> writeSlipPng(dir, slip, stamp, index) }
-                }
-                _uiState.update {
-                    it.copy(
-                        dispatch = SlipDispatch(
-                            requestId = System.nanoTime(),
-                            uris = uris,
-                            index = 0,
-                            label = label
-                        )
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to cache slips for sharing", e)
-                _uiState.update { it.copy(error = "Failed to save image for sharing: ${e.message}") }
+                withTimeout(5_000) { slipExporter.discardUnshared(batch) }
+            } catch (failure: Exception) {
+                Log.w(TAG, "Could not remove an unshared print batch", failure)
             }
         }
     }
 
-    /**
-     * Called once the `ACTION_SEND` activity for the current slip has RETURNED. Only then does the
-     * next slip go out - that sequencing is the whole point.
-     */
-    fun onSlipDispatched() {
-        _uiState.update { state ->
-            val dispatch = state.dispatch ?: return@update state
-            if (dispatch.hasNext) {
-                state.copy(dispatch = dispatch.copy(index = dispatch.index + 1))
-            } else {
-                state.copy(dispatch = null)
-            }
-        }
-    }
-
-    /** Aborts the whole job, e.g. when no app on the device can handle `image/png`. */
-    fun cancelDispatch(reason: String? = null) {
-        _uiState.update { it.copy(dispatch = null, error = reason ?: it.error) }
+    override fun onCleared() {
+        ownedBatch = null
+        super.onCleared()
     }
 
     /** True when the remembered target still exists and can be launched directly. */
@@ -451,6 +481,7 @@ class ProxyGeneratorViewModel(
 
     /** The visible "change target" affordance: next print goes back through the chooser. */
     fun forgetPrinterTarget() {
+        _uiState.update { it.copy(printerTarget = null) }
         viewModelScope.launch {
             try {
                 PrinterTargetStore.forget(getApplication())
@@ -462,31 +493,6 @@ class ProxyGeneratorViewModel(
 
     fun clearError() {
         _uiState.update { it.copy(error = null, artError = null, renderError = null) }
-    }
-
-    // ------------------------------------------------------------------
-    // Cache plumbing
-    // ------------------------------------------------------------------
-
-    /** Must match the `<cache-path name="shared_images" path="images/" />` entry in file_paths.xml. */
-    private fun cacheImagesDir(): File {
-        val dir = File(getApplication<Application>().cacheDir, CACHE_IMAGES_DIR)
-        if (!dir.exists()) dir.mkdirs()
-        return dir
-    }
-
-    /** ONE PNG PER SLIP. Never a combined sheet - each file is one physical strip of paper. */
-    private fun writeSlipPng(dir: File, slip: PrintSlip, stamp: Long, index: Int): Uri {
-        val file = File(dir, "slip_${stamp}_${index + 1}of${slip.totalSlips}.png")
-        FileOutputStream(file).use { out ->
-            slip.bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-        }
-        val application = getApplication<Application>()
-        return FileProvider.getUriForFile(
-            application,
-            "${application.packageName}$FILE_PROVIDER_SUFFIX",
-            file
-        )
     }
 
     companion object {
@@ -503,7 +509,5 @@ class ProxyGeneratorViewModel(
         /** Session history depth. */
         const val MAX_HISTORY = 20
 
-        const val CACHE_IMAGES_DIR = "images"
-        const val FILE_PROVIDER_SUFFIX = ".fileprovider"
     }
 }
