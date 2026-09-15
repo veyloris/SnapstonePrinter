@@ -65,7 +65,7 @@ Treat original invocation/commit association as inherited from the main thread u
 
 ## Execution evidence
 
-Unverified: record validator versions and results, local Gradle reports, KSP investigation evidence, hosted run URL/results, review verdict, and any external activation limitations here before marking the relevant step complete.
+Use the dated records below for observed results and the linked PRs for current delivery state.
 
 ### Step 1 local checks — measured 2026-09-15
 
@@ -115,8 +115,8 @@ and exact Gradle task set `{testDebugUnitTest, lintDebug, assembleDebug}`. The i
 also checked action pins, checkout credentials disabled, the job timeout, report upload
 on failure, successful-build APK upload, and artifact retention against Step 1.
 
-Unverified: independent/security review and hosted SDK provisioning, checks, and artifacts
-remain with the main thread. Emulator and physical printer checks were not run in Step 1.
+Consult the later hosted/review record below for follow-through. Emulator and physical
+printer checks were not run in Step 1.
 
 ### Hosted SDK setup correction — 2026-09-15
 
@@ -135,5 +135,51 @@ Measured 2026-09-15 after this correction:
 returned exit 0 with no diagnostics; output log:
 `/tmp/snapstone-step1-actionlint-sdk-fix.log`.
 
-Unverified: the corrected hosted run remains with the main thread; do not treat local
-workflow lint as proof that SDK provisioning succeeds on the hosted runner.
+Consult the later hosted record below for the corrected run; do not treat local workflow
+lint as proof that SDK provisioning succeeds on the hosted runner.
+
+### Hosted checks, review, and delivery — measured 2026-09-15
+
+`gh run view 34998887037 --repo veyloris/SnapstonePrinter --json status,conclusion`
+returned `{"conclusion":"success","status":"completed"}` for workflow commit
+`b3bfede907fcb0ad1a151f3b23b3134b01ba0aa1`.
+[The hosted run](https://github.com/veyloris/SnapstonePrinter/actions/runs/34998887037)
+completed SDK provisioning, Gradle checks, and both artifact uploads.
+
+`gh api repos/veyloris/SnapstonePrinter/actions/runs/34998887037/artifacts`
+returned nonexpired artifacts named `debug-apk` and `test-and-lint-reports`.
+After `gh run download 34998887037 --repo veyloris/SnapstonePrinter --name
+test-and-lint-reports --dir /tmp/snapstone-hosted-reports`, the XML aggregation used
+for local checks above, now against the downloaded reports, returned:
+
+```json
+{"tests":76,"failures":0,"errors":0,"skipped":0,"lintErrors":0,"lintWarnings":57}
+```
+
+The downloaded hosted log retained the KSP 2.3.5 exception despite successful tasks;
+consult [the separate KSP patch PR](https://github.com/veyloris/SnapstonePrinter/pull/2)
+for the clean before/after reproduction and fix. Treat the Node 20 action-runtime
+deprecation annotation as a remaining diagnostic, not a failing check.
+
+Independent general reviews and separate workflow security passes on 2026-09-15
+reported no must-fix findings. The main thread spot-checked the workflow, version diff,
+Renovate extraction/rule outputs, and the locally generated dependency snapshot.
+
+`gh api repos/veyloris/SnapstonePrinter/rules/branches/master` returned an active
+required-status rule for `Build, test, lint` from GitHub Actions integration `15368`,
+with strict base freshness. `gh pr checks 1 --repo veyloris/SnapstonePrinter --required`
+returned that check as passing for the hosted run above. The advisory dependency
+submission job is not part of the required-status rule.
+
+Use [CI PR #1](https://github.com/veyloris/SnapstonePrinter/pull/1),
+[KSP PR #2](https://github.com/veyloris/SnapstonePrinter/pull/2), and
+[dependency PR #3](https://github.com/veyloris/SnapstonePrinter/pull/3) for current
+delivery state. Land CI first, then refresh the sibling branches against the new
+default branch before merging them so their heads receive the required check.
+
+Unverified: Renovate activation and hosted dependency submission require the
+configuration on the default branch; local extraction and generation do not certify
+either. The main thread enabled vulnerability alerts and read back HTTP 204 on
+2026-09-15; the user confirmed all-repository Renovate App access. Preserve these
+limits until observing a default-branch run. No merges or upstream writes were made
+during the recorded implementation.
