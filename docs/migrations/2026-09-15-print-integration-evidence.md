@@ -77,3 +77,22 @@ Android test APK compilation is not device execution. After adding the lifecycle
 ## Unverified
 
 Inherited B4 is authorization supplied by root. Hosted execution of the integrated registry/receiver/ownership cases and independent general/security review remain pending. Physical output, real printer-app behavior and OS cache eviction are outside the test claim.
+
+## First integrated hosted run and fixture corrections
+
+At `f1377a6`, [run 35008463394](https://github.com/veyloris/SnapstonePrinter/actions/runs/35008463394) reported 86 tests with four failures in `/tmp/snapstone-print-b-first-reports/app/build/outputs/androidTest-results/connected/debug/TEST-test(AVD) - 16.xml`: the three continuation/recreation host cases could not find a next-slip prompt, and the external receiver driver timed out waiting for its receipt. The ownership and same-turn admission cases passed in that report; this supersedes their earlier compile-only status, while overall acceptance remains incomplete.
+
+The fake host fixtures supplied transform layout without per-face image URIs. Running `/tmp/PrintFixtureCount.java` against the compiled `f1377a6` production classes and Kotlin stdlib produced `/tmp/snapstone-print-fixture-count.log`:
+
+```text
+per-face-art=false planned-slips=1
+per-face-art=true planned-slips=2
+```
+
+The fixture correction supplies per-face `fixture://` URLs backed by fake ArtSource and asserts exactly two completed slips before starting either multi-slip test. Production SlipPlanner is unchanged.
+
+The external failure's logcat records the remembered target but no receiver launch. **Hypothesis:** raw accessibility polling began while asynchronous export still needed a Compose test-clock frame to launch. The driver now uses Compose's bounded `waitUntil` for the expected Launched index before polling the external UI; require hosted execution to confirm this diagnosis.
+
+The expanded external test recreates the host while the first real receiver is open, checks the retained ViewModel/token and unchanged receiver activity identity, and still requires explicit Next after Return Cancel. During the second open receiver, it invokes Stop on Main and uses the receiver's test-only `Read URI again` button to reopen/decode the same URI after Stop, checking a fresh read counter, dimensions and pixel hash before draining Return OK into Cancelled. `HistoryPrintAdmissionUiTest` drives the actual screen callback: pending tone rejects Reprint with its sheet/error retained, then completed tone allows Reprint and closes the sheet while fake export remains held. Treat these new combined assertions as compiled test intentions until hosted execution.
+
+At `f1377a6` plus these test-only changes, `:app:assembleDebugAndroidTest :app:lintDebug` exited 0 in 19 seconds on 2026-09-15 (`/tmp/snapstone-print-fixture-correction-compile.log`). No production files changed in this correction.

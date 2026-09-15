@@ -23,6 +23,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.snapstoneprinter.data.api.ScryfallApiService
 import com.example.snapstoneprinter.data.model.CardFace
+import com.example.snapstoneprinter.data.model.ImageUris
 import com.example.snapstoneprinter.data.model.ScryfallCard
 import com.example.snapstoneprinter.data.print.ExportedSlips
 import com.example.snapstoneprinter.data.print.PrintJobState
@@ -55,6 +56,7 @@ class PrintDispatchHostTest {
             vm.fetchCardByName("Two faces")
         }
         compose.waitUntil { vm.uiState.value.canPrint }
+        compose.runOnIdle { assertEquals(2, vm.uiState.value.slips.size) }
     }
 
     @Test fun returnWaitsForChoiceAndStopSendsNothing() {
@@ -175,7 +177,7 @@ class PrintDispatchHostTest {
                     override suspend fun getRandomCard(query: String?) = card()
                     override suspend fun getCardByName(fuzzy: String) = card()
                 }), object : ArtSource {
-                    override suspend fun fetch(url: String): ArtResult = error("Unexpected art")
+                    override suspend fun fetch(url: String): ArtResult = ArtResult.Success(Bitmap.createBitmap(3, 2, Bitmap.Config.ARGB_8888))
                 }, object : SlipRenderer {
                     override suspend fun render(plan: List<SlipContent>, art: List<Bitmap?>, contrast: Float, brightness: Float) =
                         plan.map { PrintSlip(Bitmap.createBitmap(3, 2, Bitmap.Config.ARGB_8888),
@@ -189,7 +191,8 @@ class PrintDispatchHostTest {
     }
 
     private fun card() = ScryfallCard(name = "Two faces", layout = "transform",
-        card_faces = listOf(CardFace(name = "Front"), CardFace(name = "Back")))
+        card_faces = listOf(CardFace(name = "Front", image_uris = ImageUris(artCrop = "fixture://front")),
+            CardFace(name = "Back", image_uris = ImageUris(artCrop = "fixture://back"))))
 
     private data class Launch(val code: Int, val intent: Intent, val contract: ActivityResultContract<*, *>)
     private class RecordingRegistry : ActivityResultRegistry() {

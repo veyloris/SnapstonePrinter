@@ -15,9 +15,12 @@ import android.widget.ScrollView
 import android.widget.TextView
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.UUID
 import org.json.JSONObject
 
 class PrintReceiverActivity : Activity() {
+    private val activityInstance = UUID.randomUUID().toString()
+    private var readCount = 0
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val receipt = readReceipt(intent)
@@ -32,6 +35,10 @@ class PrintReceiverActivity : Activity() {
         }
         column.addView(ScrollView(this).apply { addView(receiptView) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        column.addView(Button(this).apply {
+            text = "Read URI again"
+            setOnClickListener { receiptView.text = readReceipt(intent).toString() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         for ((label, result) in listOf("Return OK" to RESULT_OK, "Return Cancel" to RESULT_CANCELED)) {
             column.addView(Button(this).apply {
                 text = label
@@ -46,6 +53,8 @@ class PrintReceiverActivity : Activity() {
 
     private fun readReceipt(incoming: Intent): JSONObject {
         val receipt = JSONObject()
+            .put("activityInstance", activityInstance)
+            .put("readCount", ++readCount)
             .put("action", incoming.action ?: JSONObject.NULL)
             .put("mime", incoming.type ?: JSONObject.NULL)
             .put("uid", Process.myUid())
