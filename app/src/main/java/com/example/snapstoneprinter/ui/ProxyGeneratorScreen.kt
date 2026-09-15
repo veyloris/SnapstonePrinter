@@ -35,6 +35,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,6 +77,11 @@ enum class AppMode(val displayName: String) {
     MOMIR_VIG("MomirVig")
 }
 
+internal val AppModeSaver: Saver<AppMode, String> = Saver(
+    save = { it.name },
+    restore = { stored -> AppMode.entries.firstOrNull { it.name == stored } ?: AppMode.SNAPSTONE_WIELDER }
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProxyGeneratorScreen(
@@ -89,7 +96,7 @@ fun ProxyGeneratorScreen(
     var historyError by remember { mutableStateOf<String?>(null) }
     var showSearchSheet by remember { mutableStateOf(false) }
     var showMomirVigSheet by remember { mutableStateOf(false) }
-    var appMode by remember { mutableStateOf(AppMode.SNAPSTONE_WIELDER) }
+    var appMode by rememberSaveable(stateSaver = AppModeSaver) { mutableStateOf(AppMode.SNAPSTONE_WIELDER) }
 
     // Snapstone Wielder rolls immediately; MomirVig needs a CMC first, so its roll action opens
     // the picker sheet instead - the SAME control doubles as "pick a different CMC" later.
