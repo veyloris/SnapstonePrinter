@@ -1,11 +1,26 @@
 # SnapstonePrinter — Handoff
 
-## Current validation record — 2026-09-15
+## Current delivery and validation record — 2026-09-15
 
-Use the [Milestone 1 migration](docs/migrations/2026-09-15-milestone-1.md) for the
-authorized automation scope and the [validation appendix](docs/migrations/2026-09-15-milestone-1-appendix.md)
-for commands and measured results. Treat emulator, interactive UI, and physical printer
-observations below as inherited; do not interpret local JVM checks as device verification.
+The core roadmap is complete through merged [PR8](https://github.com/veyloris/SnapstonePrinter/pull/8),
+verified at squash commit `4a4c4ea4fb0702d628de76be5d275062e411c3d6`.
+The [final acceptance record](docs/migrations/2026-09-15-print-integration-evidence.md#final-core-acceptance--2026-09-15)
+anchors passing build/lint/unit checks and hosted instrumentation at PR head `5085ee0`:
+87 tests, no failures, errors, or skips. It includes real receiver PNG delivery, host recreation
+while that receiver remains open, explicit continuation, retained URI readability after Stop,
+and the actual history admission callback. Consult the
+[roadmap](docs/migrations/2026-09-15-card-print-correctness.md) for feature scope and the
+[Milestone 1 migration](docs/migrations/2026-09-15-milestone-1.md) for automation scope.
+
+Preserve the inherited handoff below as historical: its automatic-next-slip description and
+old counts do not describe this release. The dispatch contract requires `Send next slip` or
+`Stop`; sharing results do not acknowledge paper output.
+
+Historical manual-check reminder: the image-controls section records that actual slider
+dragging was not exercised, and the history section records that interactive history/reprint
+was not exercised in that session. New automated tests do not turn those into manual observations.
+Physical phone/printer work remains excluded by the user's scope; no paper-output verification
+is claimed. Optional signed release automation remains outside the authorized core stop line.
 
 ## Historical handoff — inherited 2026-09-14 record
 

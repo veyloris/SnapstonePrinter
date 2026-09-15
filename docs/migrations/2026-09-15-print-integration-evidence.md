@@ -1,6 +1,6 @@
 # Print integration evidence
 
-Created: 2026-09-15. State: started; hosted integration acceptance pending.
+Created: 2026-09-15. State: complete; see [final core acceptance](#final-core-acceptance--2026-09-15). Earlier failed runs and pending statements below are historical observations superseded by that final record.
 
 ## Premises
 
@@ -120,3 +120,38 @@ At `26f6c81`, [run 35011118554](https://github.com/veyloris/SnapstonePrinter/act
 Give each native receiver button a stable contentDescription and compare its string value in the test driver, preserving the visible labels and result/click assertions. Add a bounded active accessibility-tree summary to timeout failures to distinguish a missing control from the wrong foreground window. The exact prior text mismatch (including whether theme transformation contributed) was not measured; do not describe all-caps behavior as its established cause. No production files change in this correction.
 
 At `26f6c81` plus this test-only correction, `:app:assembleDebugAndroidTest :app:lintDebug` exited 0 in 17 seconds on 2026-09-15 (`/tmp/snapstone-print-accessibility-id-compile.log`); `git diff --check` returned no output. The revised receiver controls and remaining post-return assertions require hosted execution.
+
+## Final core acceptance — 2026-09-15
+
+**Measured:** the closeout executor queried the following on 2026-09-15 after creating branch `docs-core-closeout` from `origin/master` at `4a4c4ea4fb0702d628de76be5d275062e411c3d6`:
+
+```bash
+gh pr view 8 --repo veyloris/SnapstonePrinter --json state,mergedAt,mergeCommit,headRefOid,url
+gh run view 35012018817 --repo veyloris/SnapstonePrinter --json headSha,conclusion,url
+gh run view 35012018681 --repo veyloris/SnapstonePrinter --json headSha,conclusion,url
+```
+
+The [PR8](https://github.com/veyloris/SnapstonePrinter/pull/8) response returned `MERGED`, merge time `2026-09-15T19:16:31Z`, squash commit `4a4c4ea4fb0702d628de76be5d275062e411c3d6`, and PR head `5085ee0dda0e0316daa1cf34752b17cd41c1d1ed`. Both the [instrumentation run](https://github.com/veyloris/SnapstonePrinter/actions/runs/35012018817) and [build/test/lint run](https://github.com/veyloris/SnapstonePrinter/actions/runs/35012018681) returned `success` at that exact PR head. A separate `gh pr list --repo veyloris/SnapstonePrinter --state merged --limit 10 --json number,mergedAt` query returned PRs 1–9 as merged on 2026-09-15, anchoring the roadmap's earlier feature links.
+
+**Measured:** inspection of the downloaded instrumentation XML at `/tmp/snapstone-print-b-green-reports/app/build/outputs/androidTest-results/connected/debug/TEST-test(AVD) - 16.xml` returned:
+
+```xml
+<testsuites tests="87" failures="0" errors="0" skipped="0" time="0.000" timestamp="2026-09-15T19:14:54" hostname="localhost">
+```
+
+The report includes passing `PrintExternalReceiverTest.externalReceiverReadsCorrectPngAndWaitsForExplicitNext` and `HistoryPrintAdmissionUiTest.realHistoryCallbackKeepsRejectedSheetOpenAndClosesAcceptedSheet`. Source inspection at the merged commit confirms the former asserts separate-UID PNG pixels/grants, replacement of the covered host while the same receiver stays open, retained ViewModel/token, explicit next-slip continuation, and successful URI rereading after Stop; the latter exercises the actual history callback's rejected/accepted sheet behavior. These results supersede the earlier fixture failures and combined-acceptance uncertainty. They do not establish physical printing or arbitrary third-party printer-app behavior.
+
+**Inherited:** root coordinated independent review and authorized self-merge for this run. This executor checked merge state and reports, not the reviewers' entire deliberations. Physical phones/printers remain excluded by the user's scope; optional signed release automation remains outside the core stop line. HANDOFF's unexercised manual slider/history observations remain historical limits rather than new standing tasks.
+
+### Documentation closeout observations
+
+Before editing on 2026-09-15, `git status --short` returned no output at `4a4c4ea`; reading the HANDOFF opening and dispatch/integration headers showed the old validation-only header and pending states. A retrospective `git show HEAD:<path>` check additionally confirmed the roadmap's old Step1-pending and Step2-ready headings. Keep that retrospective inspection distinct from the initial pre-edit reads.
+
+After editing, this query identified the new header, complete migration states, and neutral Step1/Step2 headings:
+
+```bash
+rg -n '^Created:|^### Step [12]|^## Current' HANDOFF.md docs/migrations/2026-09-15-card-print-correctness.md docs/migrations/2026-09-15-print-dispatch-contract.md docs/migrations/2026-09-15-print-integration-evidence.md
+git diff --name-only
+```
+
+The changed-file inventory contained only HANDOFF and those three migration documents. No production or workflow file was in that output; no build was rerun for this documentation-only closeout.
