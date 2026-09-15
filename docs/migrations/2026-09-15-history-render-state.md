@@ -1,6 +1,6 @@
 # History and latest-render state validation
 
-Created: 2026-09-15. State: started (regression preparation).
+Created: 2026-09-15. State: started (implementation; hosted green pending).
 
 ## Premises
 
@@ -49,7 +49,15 @@ Before, measured 2026-09-15 at the revision above:
 353:    fun reprint(entry: HistoryEntry) {
 ```
 
-After: unverified until production implementation.
+After implementation, measured 2026-09-15 on red-test HEAD
+`51e0f89689149cd3e61a0aef6994b83486202f2c` plus the uncommitted implementation:
+
+```text
+220:                if (debounce) delay(REDITHER_DEBOUNCE_MS)
+299:    private fun generateProxy(notFoundMessage: String, fetchBlock: suspend () -> ScryfallCard) {
+380:    fun printCurrentCard() {
+387:    fun reprint(entry: HistoryEntry) {
+```
 
 ## Validation
 
@@ -63,10 +71,82 @@ Measured 2026-09-15 before refreshing the execution base: exit 0, `BUILD SUCCESS
 `88 actionable tasks: 88 executed`; full output `/tmp/snapstone-history-red-compile.log`.
 `git diff --check` returned exit 0. Compilation does not execute instrumentation.
 
-Unverified: hosted red assertions, implementation, hosted green assertions, and independent review.
+### Hosted red — 2026-09-15
+
+The executor independently inspected the XML artifact at
+`/tmp/snapstone-history-red-reports/app/build/outputs/androidTest-results/connected/debug/TEST-test(AVD) - 16.xml`;
+artifact download provenance is inherited from the main thread's
+[run 35003959401](https://github.com/veyloris/SnapstonePrinter/actions/runs/35003959401)
+at `51e0f89689149cd3e61a0aef6994b83486202f2c`.
+
+```text
+42 tests, 4 failures, 0 errors
+completedToneUpdatesOnlyItsExistingHistorySnapshot: history retained a different slip reference
+oldFetchFailureCannotClearNewRequestBusyState: new request must remain loading
+toneDebounceImmediatelyDisablesPrinting: tone work includes the debounce period
+delayedOldFetchCannotReplaceNewerCard: expected New, observed Old
+```
+
+### Implementation and local checks — 2026-09-15
+
+Implement the [standalone render contract](2026-09-15-history-render-contract.md) for
+generation/revision ownership, applied tone, nonblocking failure presentation, ID-based reprint
+eligibility, and same-ID thumbnail replacement. Keep the separate dispatch transport unchanged.
+
+The executor authored controlled ArtSource/SlipRenderer tests with a virtual Main dispatcher
+and UI notice/thumbnail assertions before changing production. `ProxyGeneratorRenderOwnershipTest`
+restores Main in teardown and uses cancellation-ignoring deferred completions to exercise ownership
+checks; the existing API-gated cases retain the measured runtime red evidence above.
+
+The local command above returned exit 0 after implementation, `BUILD SUCCESSFUL in 31s`,
+`88 actionable tasks: 24 executed, 64 up-to-date`; log `/tmp/snapstone-history-green-local.log`.
+`git diff --check` returned exit 0. The malformed-render test was subsequently extended to
+cover both empty and excess output, and the eviction case now checks monotonic history IDs;
+the same local command then returned exit 0, `BUILD SUCCESSFUL in 12s`,
+`88 actionable tasks: 8 executed, 80 up-to-date`
+(`/tmp/snapstone-history-green-local-final.log`). The added controlled-renderer and UI assertions
+remain compile-validated only until hosted execution; do not count them as runtime passes yet.
+
+Supplemental contract scope query, measured at the same implementation snapshot:
+
+```bash
+git rev-parse HEAD
+rg -n 'fun reprint|fun dispatchSlips|canPrint|fun HistorySheet|onReprint|fun ProxyPreview|fun InlineToneControls' app/src/main -g '*.kt'
+rg -n 'prepareArt|coroutines.test|coroutines-test' app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorViewModel.kt app/build.gradle.kts gradle/libs.versions.toml
+```
+
+```text
+51e0f89689149cd3e61a0aef6994b83486202f2c
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyPanels.kt:115:fun InlineToneControls(
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyPanels.kt:426:fun HistorySheet(
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyPanels.kt:428:    onReprint: (HistoryEntry) -> Unit,
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyPanels.kt:467:                        HistoryRow(entry = entry, onReprint = { onReprint(entry) })
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyPanels.kt:476:private fun HistoryRow(entry: HistoryEntry, onReprint: () -> Unit) {
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyPanels.kt:524:        FilledTonalButton(onClick = onReprint, modifier = Modifier.heightIn(min = 48.dp)) {
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorViewModel.kt:120:    val canPrint: Boolean
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorViewModel.kt:382:        if (!state.canPrint || state.dispatch != null) return
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorViewModel.kt:387:    fun reprint(entry: HistoryEntry) {
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorViewModel.kt:402:    private fun dispatchSlips(slips: List<PrintSlip>, label: String) {
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorScreen.kt:270:            onReprint = {
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorScreen.kt:567:                enabled = uiState.canPrint && uiState.dispatch == null,
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorScreen.kt:618:fun ProxyPreview(
+app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorScreen.kt:977:fun ProxyPreviewEmptyPreview() {
+gradle/libs.versions.toml:66:kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutinesTest" }
+app/build.gradle.kts:100:    testImplementation(libs.kotlinx.coroutines.test)
+app/build.gradle.kts:106:    androidTestImplementation(libs.kotlinx.coroutines.test)
+```
+
+The query no longer locates `prepareArt` in the ViewModel because the default `AndroidSlipRenderer`
+now owns that call; inspect `image/SlipRenderer.kt` alongside the scope query.
+
+Changed paths for this step: `ProxyGeneratorViewModel.kt`, `ProxyGeneratorScreen.kt`,
+`ProxyPanels.kt`, `ArtDownloader.kt`, new `ArtSource.kt`/`SlipRenderer.kt`, the existing-version
+Android coroutine-test dependency in `app/build.gradle.kts`, the state/ownership/UI regression
+tests, and this step's contract/evidence documents. Unverified: hosted green assertions and
+independent review remain with the main thread.
 
 ## Limits
 
-The initial tests exercise real asynchronous rendering but do not control its completion order;
-reserve cancellation-ignoring renderer and rapid-tone ordering cases for the injected renderer.
+`ProxyGeneratorStateTest` exercises real asynchronous rendering; the added
+`ProxyGeneratorRenderOwnershipTest` controls renderer completion and tone timing through its fakes.
 Do not infer actual export behavior from `canPrint`, nor physical printing from a state assertion.
