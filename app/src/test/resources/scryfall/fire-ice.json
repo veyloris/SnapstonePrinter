@@ -1,0 +1,26 @@
+{
+  "id": "18303862-4726-4136-814f-157aa7006579",
+  "name": "Fire // Ice",
+  "mana_cost": "{1}{R} // {1}{U}",
+  "type_line": "Instant // Instant",
+  "layout": "split",
+  "image_uris": {
+    "art_crop": "https://cards.scryfall.io/art_crop/front/1/8/18303862-4726-4136-814f-157aa7006579.jpg?1783918420",
+    "normal": "https://cards.scryfall.io/normal/front/1/8/18303862-4726-4136-814f-157aa7006579.jpg?1783918420",
+    "large": "https://cards.scryfall.io/large/front/1/8/18303862-4726-4136-814f-157aa7006579.jpg?1783918420"
+  },
+  "card_faces": [
+    {
+      "name": "Fire",
+      "mana_cost": "{1}{R}",
+      "type_line": "Instant",
+      "oracle_text": "Fire deals 2 damage divided as you choose among one or two targets."
+    },
+    {
+      "name": "Ice",
+      "mana_cost": "{1}{U}",
+      "type_line": "Instant",
+      "oracle_text": "Tap target permanent.\nDraw a card."
+    }
+  ]
+}

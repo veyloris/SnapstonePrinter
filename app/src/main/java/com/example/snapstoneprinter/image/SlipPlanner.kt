@@ -35,7 +35,9 @@ data class SlipContent(
      * Empty for every other card, including true two-slip DFCs (their back face is its own
      * [SlipContent], not a [SecondaryFace] of the front).
      */
-    val secondaryFaces: List<SecondaryFace> = emptyList()
+    val secondaryFaces: List<SecondaryFace> = emptyList(),
+    val loyalty: String? = null,
+    val defense: String? = null
 )
 
 /**
@@ -52,7 +54,9 @@ data class SecondaryFace(
     val typeLine: String?,
     val oracleText: String?,
     val power: String?,
-    val toughness: String?
+    val toughness: String?,
+    val loyalty: String? = null,
+    val defense: String? = null
 )
 
 /**
@@ -142,31 +146,33 @@ object SlipPlanner {
                 toughness = face.toughness.nullIfBlank(),
                 artUrl = face.bestArtUrl(),
                 label = labelFor(card, index),
-                fullImageUrl = face.bestFullUrl()
+                fullImageUrl = face.bestFullUrl(),
+                loyalty = face.loyalty.nullIfBlank(),
+                defense = face.defense.nullIfBlank()
             )
         }
     }
 
-    /**
-     * The legacy single-slip content: everything read through the `effective*` resolvers, no label.
-     * Behaviour here is intentionally identical to the pre-multi-slip renderer, PLUS
-     * [SecondaryFace] entries for split / flip / adventure so the other half's rules text isn't
-     * silently dropped (see [secondaryFacesFor]).
-     */
-    fun singleSlipContent(card: ScryfallCard): SlipContent = SlipContent(
-        faceIndex = 0,
-        totalSlips = 1,
-        name = card.effectiveName,
-        manaCost = card.effectiveManaCost,
-        typeLine = card.effectiveTypeLine,
-        oracleText = card.effectiveOracleText,
-        power = card.effectivePower,
-        toughness = card.effectiveToughness,
-        artUrl = card.effectiveImageUrl,
-        label = null,
-        fullImageUrl = card.effectiveNormalUrl,
-        secondaryFaces = secondaryFacesFor(card)
-    )
+    /** Keep printed face fields local; CardFixturePlanningTest covers aggregate-field rejection. */
+    fun singleSlipContent(card: ScryfallCard): SlipContent {
+        val face = card.card_faces?.takeIf { it.size >= 2 }?.first()
+        return SlipContent(
+            faceIndex = 0,
+            totalSlips = 1,
+            name = if (face != null) face.name.nullIfBlank() ?: card.name else card.effectiveName,
+            manaCost = if (face != null) face.mana_cost.nullIfBlank() else card.effectiveManaCost,
+            typeLine = if (face != null) face.type_line.nullIfBlank() else card.effectiveTypeLine,
+            oracleText = if (face != null) face.oracle_text.nullIfBlank() else card.effectiveOracleText,
+            power = if (face != null) face.power.nullIfBlank() else card.effectivePower,
+            toughness = if (face != null) face.toughness.nullIfBlank() else card.effectiveToughness,
+            artUrl = card.effectiveImageUrl,
+            label = null,
+            fullImageUrl = card.effectiveNormalUrl,
+            secondaryFaces = secondaryFacesFor(card),
+            loyalty = if (face != null) face.loyalty.nullIfBlank() else card.effectiveLoyalty,
+            defense = if (face != null) face.defense.nullIfBlank() else card.effectiveDefense
+        )
+    }
 
     /**
      * The card_faces beyond the first, for a card that stays on ONE slip (split / flip /
@@ -190,7 +196,9 @@ object SlipPlanner {
                 typeLine = face.type_line.nullIfBlank(),
                 oracleText = face.oracle_text.nullIfBlank(),
                 power = face.power.nullIfBlank(),
-                toughness = face.toughness.nullIfBlank()
+                toughness = face.toughness.nullIfBlank(),
+                loyalty = face.loyalty.nullIfBlank(),
+                defense = face.defense.nullIfBlank()
             )
         }
     }

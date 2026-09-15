@@ -316,13 +316,12 @@ class SlipPlannerTest {
     }
 
     @Test
-    fun testPlan_singleSlipUsesEffectiveResolvers() {
+    fun testPlan_singleSlipUsesPrimaryFaceAndSharedArt() {
         val content = SlipPlanner.plan(splitCard).single()
-        assertEquals("Fire // Ice", content.name)
+        assertEquals("Fire", content.name)
         assertEquals("https://img/fire-ice.jpg", content.artUrl)
         assertEquals(0, content.faceIndex)
         assertEquals(1, content.totalSlips)
-        // Falls back to card_faces[0] for the fields the top level omits.
         assertEquals("{1}{R}", content.manaCost)
         assertEquals("Deal 2 damage divided as you choose.", content.oracleText)
     }
