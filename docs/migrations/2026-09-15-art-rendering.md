@@ -1,6 +1,6 @@
 # Prepare art at print dimensions
 
-Created: 2026-09-15. State: started (hosted red-test preparation).
+Created: 2026-09-15. State: started (implementation; hosted green verification pending).
 
 ## Premises
 
@@ -64,7 +64,22 @@ app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:233:     
 app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:283:                c.drawBitmap(ditheredArt, srcRect, destRect, Paint(Paint.FILTER_BITMAP_FLAG))
 ```
 
-After: unverified until implementation and hosted regression results.
+After production implementation, measured 2026-09-15 on red-test commit
+`792d9aa37eb41f426ad5b71bb9d660acc900302a` plus the uncommitted fix:
+
+```text
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:22:    const val OUTPUT_WIDTH = 384
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:40:    private const val PADDING = 12
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:41:    const val ART_WIDTH = OUTPUT_WIDTH - 2 * PADDING
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:45:    fun prepareArt(
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:52:        return applyFloydSteinbergDithering(resized, contrast, brightness)
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:68:    fun applyFloydSteinbergDithering(
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:128:     * Every slip is independently [OUTPUT_WIDTH] px wide and gets its own
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:162:     * always exactly [OUTPUT_WIDTH] pixels.
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:187:        val canvasWidth = OUTPUT_WIDTH
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:188:        val padding = PADDING
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:253:        val imgHeight = ditheredArt?.height ?: 0
+```
 
 ### Red-test preparation — 2026-09-15
 
@@ -93,3 +108,41 @@ retain the Gradle exit status even if log capture fails.
 Unverified: hosted image provisioning, runtime regressions, independent/security review,
 and inherited authorization remain with the main thread. Do not claim physical printing
 from bitmap or emulator results.
+
+## Hosted red and implementation — 2026-09-15
+
+Measured using `gh run view 35002043418 --repo veyloris/SnapstonePrinter --log-failed`
+and downloaded `android-test-reports` from
+[the red run](https://github.com/veyloris/SnapstonePrinter/actions/runs/35002043418)
+at `792d9aa37eb41f426ad5b71bb9d660acc900302a`:
+
+```text
+tests="35" failures="4" errors="0" skipped="0"
+legacyCompositionRejectsUnpreparedArtWidth: expected IllegalArgumentException; nothing thrown
+cardCompositionRejectsUnpreparedArtWidth: expected IllegalArgumentException; nothing thrown
+planCompositionRejectsUnpreparedArtWidth: expected IllegalArgumentException; nothing thrown
+preparedPatternSurvivesCompositionAndPngExactly: passed
+slipFillsAvailableWidthAndKeepsAspectRatio: slip width 304 dp versus requested 400 dp
+```
+
+Local artifact copy: `/tmp/snapstone-art-hosted-red-reports/`; build log:
+`/tmp/snapstone-art-hosted-red.log`. The log reports emulator display `320x640, dpi: 160x160`,
+and captured logcat reports density 1.0 with width 320. The layout fixture requested 400 dp,
+so its comparison against requested width exceeded the available viewport; the observed
+304 dp matches 320 dp minus the preview's side padding. Measure the actual tagged container
+instead, retain the existing 80% filling threshold and aspect-ratio assertion, and additionally
+require positive dimensions and no horizontal overflow. Keep the production preview unchanged.
+
+After these expected width failures, the executor added preparation dimension/binary/input
+preservation tests and a generated-art composition/PNG test before implementing `prepareArt`.
+The new preparation ordering test compares against resampling followed by the existing
+tone/dither routine; the final-art test checks every art pixel against prepared output in both
+the composed slip and decoded PNG, separately from antialiased text.
+
+The first local post-fix command matched the red compilation command above and returned
+exit 0, `BUILD SUCCESSFUL in 24s`, `88 actionable tasks: 23 executed, 65 up-to-date`
+(`/tmp/snapstone-art-green-local.log`). After the viewport fixture correction and native-width
+source case, the same command returned exit 0, `BUILD SUCCESSFUL in 10s`,
+`88 actionable tasks: 8 executed, 80 up-to-date`
+(`/tmp/snapstone-art-green-local-final.log`); `git diff --check` returned exit 0.
+Unverified: final hosted runtime acceptance remains pending.

@@ -3,7 +3,6 @@ package com.example.snapstoneprinter.image
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.text.Layout
@@ -39,6 +38,19 @@ object ImageProcessor {
     const val DEFAULT_BRIGHTNESS = Tonemap.DEFAULT_BRIGHTNESS
 
     private const val PADDING = 12
+    const val ART_WIDTH = OUTPUT_WIDTH - 2 * PADDING
+
+    /** Prepare art before composition; see prepareArtResamplesBeforeToneAndDither. */
+    @JvmOverloads
+    fun prepareArt(
+        src: Bitmap,
+        contrast: Float = DEFAULT_CONTRAST,
+        brightness: Float = DEFAULT_BRIGHTNESS
+    ): Bitmap {
+        val height = maxOf(1, (src.height.toLong() * ART_WIDTH / src.width).toInt())
+        val resized = Bitmap.createScaledBitmap(src, ART_WIDTH, height, true)
+        return applyFloydSteinbergDithering(resized, contrast, brightness)
+    }
 
     /**
      * Converts a Bitmap to monochrome.
@@ -116,8 +128,7 @@ object ImageProcessor {
      * Every slip is independently [OUTPUT_WIDTH] px wide and gets its own
      * [TRAILING_FEED_WHITESPACE_PX] tear-off band.
      *
-     * @param ditheredArt already-dithered art, indexed by slip. `getOrNull` is used, so passing an
-     *   empty list simply renders every slip text-only.
+     * @param ditheredArt supply [prepareArt] output, indexed by slip; omit entries for text-only slips.
      */
     @JvmOverloads
     fun composePrintSlips(
@@ -132,15 +143,18 @@ object ImageProcessor {
     fun composeSlips(
         plan: List<SlipContent>,
         ditheredArt: List<Bitmap?> = emptyList()
-    ): List<PrintSlip> = plan.map { content ->
-        PrintSlip(
-            bitmap = renderSlip(content, ditheredArt.getOrNull(content.faceIndex)),
-            faceName = content.name,
-            faceIndex = content.faceIndex,
-            totalSlips = content.totalSlips,
-            label = content.label,
-            fullImageUrl = content.fullImageUrl
-        )
+    ): List<PrintSlip> {
+        ditheredArt.forEach(::requirePreparedArt)
+        return plan.map { content ->
+            PrintSlip(
+                bitmap = renderSlip(content, ditheredArt.getOrNull(content.faceIndex)),
+                faceName = content.name,
+                faceIndex = content.faceIndex,
+                totalSlips = content.totalSlips,
+                label = content.label,
+                fullImageUrl = content.fullImageUrl
+            )
+        }
     }
 
     /**
@@ -154,8 +168,16 @@ object ImageProcessor {
      * top-level fields (transform / modal_dfc / split / flip) still render. This is the legacy
      * single-slip path, kept for callers that only ever want one bitmap.
      */
-    fun compositeCardProxy(card: ScryfallCard, ditheredArt: Bitmap?): Bitmap =
-        renderSlip(SlipPlanner.singleSlipContent(card), ditheredArt)
+    fun compositeCardProxy(card: ScryfallCard, ditheredArt: Bitmap?): Bitmap {
+        requirePreparedArt(ditheredArt)
+        return renderSlip(SlipPlanner.singleSlipContent(card), ditheredArt)
+    }
+
+    private fun requirePreparedArt(art: Bitmap?) {
+        require(art == null || art.width == ART_WIDTH) {
+            "Art width must be $ART_WIDTH pixels; received ${art?.width}. Call prepareArt before composition."
+        }
+    }
 
     /**
      * Draws one slip: optional small header label, name + plain-text mana cost, type line, dithered
@@ -228,10 +250,7 @@ object ImageProcessor {
             ptPaint = ptPaint
         )
 
-        var imgHeight = 0
-        if (ditheredArt != null && ditheredArt.width > 0) {
-            imgHeight = (ditheredArt.height * textWidth) / ditheredArt.width
-        }
+        val imgHeight = ditheredArt?.height ?: 0
         val artGap = if (imgHeight > 0) imgHeight + 12f else 0f
 
         currentY = primaryBlock.advance(currentY, artGap)
@@ -280,7 +299,7 @@ object ImageProcessor {
             if (ditheredArt != null && imgHeight > 0) {
                 val srcRect = Rect(0, 0, ditheredArt.width, ditheredArt.height)
                 val destRect = Rect(padding, gapY.toInt(), padding + textWidth, gapY.toInt() + imgHeight)
-                c.drawBitmap(ditheredArt, srcRect, destRect, Paint(Paint.FILTER_BITMAP_FLAG))
+                c.drawBitmap(ditheredArt, srcRect, destRect, null)
             }
         }
 

@@ -326,7 +326,7 @@ class ProxyGeneratorViewModel(
     ): List<PrintSlip> {
         val dithered = art.map { source ->
             source?.let {
-                ImageProcessor.applyFloydSteinbergDithering(
+                ImageProcessor.prepareArt(
                     src = it,
                     contrast = contrast,
                     brightness = brightness
