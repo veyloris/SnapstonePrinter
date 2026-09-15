@@ -57,7 +57,7 @@ class CardRepositoryTest {
         val card = repository.getRandomCard(isFunny = false)
 
         assertEquals("Black Lotus", card.name)
-        assertEquals("-t:land -is:extra", fakeApi.lastQuery)
+        assertEquals("-t:land -is:funny -is:extra", fakeApi.lastQuery)
     }
 
     @Test
@@ -67,7 +67,7 @@ class CardRepositoryTest {
         val card = repository.getRandomCard(isFunny = true)
 
         assertEquals("Black Lotus", card.name)
-        assertEquals("-t:land is:funny -is:extra", fakeApi.lastQuery)
+        assertEquals("-t:land -is:extra", fakeApi.lastQuery)
     }
 
     // ------------------------------------------------- junk layout re-rolling
@@ -156,7 +156,7 @@ class CardRepositoryTest {
         val repository = CardRepository(fakeApi)
         repository.getMomirVigCreature(cmc = 3, isFunny = false)
 
-        assertEquals("cmc=3 t:creature -is:extra", fakeApi.lastQuery)
+        assertEquals("cmc=3 t:creature -is:funny -is:extra", fakeApi.lastQuery)
     }
 
     @Test
@@ -165,7 +165,7 @@ class CardRepositoryTest {
         val repository = CardRepository(fakeApi)
         repository.getMomirVigCreature(cmc = 0, isFunny = true)
 
-        assertEquals("cmc=0 t:creature is:funny -is:extra", fakeApi.lastQuery)
+        assertEquals("cmc=0 t:creature -is:extra", fakeApi.lastQuery)
     }
 
     @Test
@@ -179,16 +179,19 @@ class CardRepositoryTest {
     }
 
     @Test
-    fun testGetMomirVigCreature_rejectsCmcOutsideValidRange() = runTest {
+    fun invalidCmcRejectsBeforeApiCall() = runTest {
         val fakeApi = FakeScryfallApiService()
         val repository = CardRepository(fakeApi)
 
         for (invalidCmc in listOf(-1, 17)) {
-            try {
-                repository.getMomirVigCreature(cmc = invalidCmc)
-                fail("Expected IllegalArgumentException for cmc=$invalidCmc")
-            } catch (e: IllegalArgumentException) {
-                // expected
+            for (isFunny in listOf(false, true)) {
+                try {
+                    repository.getMomirVigCreature(cmc = invalidCmc, isFunny = isFunny)
+                    fail("Expected IllegalArgumentException for cmc=$invalidCmc")
+                } catch (e: IllegalArgumentException) {
+                    assertEquals(0, fakeApi.callCount)
+                    assertEquals("UNINITIALIZED", fakeApi.lastQuery)
+                }
             }
         }
     }

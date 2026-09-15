@@ -1,0 +1,164 @@
+# Print dispatch: explicit continuation and request ownership
+
+Created: 2026-09-15. State: notstarted (executor contract).
+
+## Premises
+
+- **Measured D1:** `git rev-parse HEAD` in `/home/veyloris/git/SnapstonePrinter-worktrees/funny-filter` returned `ff381c52b32eee95ff11f4f3b95c3eb0b970f0a2` on 2026-09-15. Recheck the source after earlier roadmap PRs land; history/renderer integration is expected to change before this step executes.
+- **Measured D2:** `sed -n '335,465p' app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorViewModel.kt` at D1 shows export runs before `dispatch` is reserved, wall-clock filenames, unchecked `Bitmap.compress`, and parameterless `onSlipDispatched()` advancement. Use the appendix query below to anchor pre/post observations.
+- **Measured D3:** `sed -n '95,153p' app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorScreen.kt` at D1 shows one result launcher calling parameterless advancement and a `LaunchedEffect(requestId,index)` that launches the current URI. `sed -n '525,580p'` shows the print button is disabled only after dispatch exists.
+- **Measured D4:** `cat app/src/main/java/com/example/snapstoneprinter/data/print/ChosenComponentReceiver.kt app/src/main/java/com/example/snapstoneprinter/data/print/PrinterTargetStore.kt` at D1 shows chosen-component persistence through a non-job-scoped callback, remembered-target lookup by activity presence, and no print acknowledgement protocol.
+- **Measured D5:** the [ActivityResultRegistry API reference](https://developer.android.com/reference/androidx/activity/result/ActivityResultRegistry), inspected 2026-09-15, documents the `register(key, contract, callback)` overload, key-based result dispatch/storage, and explicit launcher unregistration. Use a stable per-dispatch key and immutable callback token, then verify recreation against an actual registry on the emulator.
+- **Inherited D6:** user explicitly chose `Ask “Send next slip” / “Stop”` on 2026-09-15. This resolves the main roadmap's prior dispatch decision gate.
+- **Inherited D7:** the main thread authorized self-merging reviewed, passing fork PRs for the continuing run; upstream writes and physical devices/printers remain excluded. Use hosted API36 instrumentation introduced by the renderer step.
+- **Inherited D8:** the history step will provide the latest completed slip snapshot and reject stale/evicted history IDs. Re-read its merged interfaces before wiring print entry points; preserve that contract.
+
+## Decision and rejected alternatives
+
+Reserve a job before asynchronous export and own transitions in a pure Kotlin coordinator. Keep Android bitmap/files/URI conversion in an exporter and ActivityResult plumbing in a small UI adapter. Use UUID job identities, monotonic slip indices, immutable URI lists, and token-bearing callbacks to make old events harmless. Keep a single active job instead of introducing a queue.
+
+After any activity-result callback with remaining slips, show `Send next slip` and `Stop`. Treat chooser dismissal and receiver return identically for this decision: neither automatically sends another slip. Treat all result codes alike; never label a slip printed based on an Android result. Reject automatic continuation, RESULT_OK-based print acknowledgement, and a printer-specific API.
+
+Keep one feature PR for this coordinator/export/UI change, implemented in bounded passes A and B below. Do not merge a helper-only intermediate pass. Preserve the current remembered-target preference independently of job progress; a chooser selection may remember the selected app but cannot advance a job.
+
+## Contract: pure coordinator
+
+Add `app/src/main/java/com/example/snapstoneprinter/data/print/PrintJobCoordinator.kt`, free of Android types. All coordinator calls occur on the main thread in production; deterministic unit tests call synchronously. No coordinator method suspends.
+
+Public types and API:
+
+```kotlin
+data class DispatchToken(val jobId: String, val index: Int)
+data class LaunchRequest(val token: DispatchToken, val uri: String, val label: String, val total: Int)
+sealed interface StartPrintResult {
+    data class Started(val jobId: String) : StartPrintResult
+    data object Busy : StartPrintResult
+    data object Empty : StartPrintResult
+}
+class PrintJobCoordinator(idFactory: () -> String = { UUID.randomUUID().toString() }) {
+    val state: StateFlow<PrintJobState>
+    fun start(label: String, total: Int): StartPrintResult
+    fun exported(jobId: String, uris: List<String>): Boolean
+    fun exportFailed(jobId: String, message: String): Boolean
+    fun claimLaunch(token: DispatchToken): LaunchRequest?
+    fun launchFailed(token: DispatchToken, message: String): Boolean
+    fun returned(token: DispatchToken): Boolean
+    fun sendNext(jobId: String): Boolean
+    fun stop(jobId: String): Boolean
+}
+```
+
+Require nonblank job IDs and nonnegative token indices when constructing tokens; factory output must be nonblank and never reused within a coordinator, otherwise throw `IllegalStateException` before entering a job. `start(total < 0)` throws `IllegalArgumentException`; `start(total == 0)` returns Empty unchanged. Check Busy first for positive totals. Every false Boolean and null launch result means the event was rejected and state is unchanged. Never represent rejected export as a valid empty URI batch.
+
+Define sealed `PrintJobState` variants exactly: `Idle`; `Preparing(jobId,label,total)`; `Ready(jobId,label,uris,index)`; `Launched(jobId,label,uris,index)`; `AwaitingNext(jobId,label,uris,index)` where index denotes the last returned slip; `Stopping(jobId,label,uris,index)` for an outstanding launched callback; `Completed(jobId)`; `Cancelled(jobId)`; `Failed(jobId,message)`. State URI lists are copied on admission and have exactly total nonblank elements; use private construction/helper validation for indexed states. Derive total from list size after export and derive token from jobId/index. Derive `isBusy` from allowed set `{Preparing,Ready,Launched,AwaitingNext,Stopping}`; terminal states permit a new start and retain only the latest outcome, not URI lists.
+
+| Current state and event | Required next state / result |
+|---|---|
+| Idle or terminal, positive start | Preparing before return; Started(new ID) |
+| Any busy state, positive start | unchanged; Busy |
+| Preparing, exported with matching ID and exact nonblank URI count | Ready at index 0; true |
+| Preparing, exported matching ID but wrong count/blank URI | Failed with `Could not prepare all slips for sharing.`; true (handled failure) |
+| Preparing, exportFailed matching ID | Failed with supplied nonblank message or `Could not save images for sharing.`; true |
+| Ready, claimLaunch matching token | Launched synchronously; return immutable LaunchRequest |
+| Launched, returned matching token with remaining slips | AwaitingNext at same index; true |
+| Launched, returned matching token at last slip | Completed; true |
+| AwaitingNext, sendNext matching ID | Ready at index + 1; true; no direct launch inside coordinator |
+| Preparing/Ready/AwaitingNext, stop matching ID | Cancelled; true |
+| Launched, stop matching ID | Stopping; true; keep outstanding token registered and new jobs Busy |
+| Stopping, returned matching token | Cancelled; true |
+| Launched/Stopping, launchFailed matching token | Failed with supplied nonblank message or `No app could open this slip.`; true |
+| Any state, event outside its listed input/state/identity combination | unchanged; false/null |
+
+Completed means the final sharing callback returned, not paper output. Repeated Stop in Stopping is unchanged false. A callback can change state once; duplicate/out-of-order/stale callbacks cannot skip a slip or affect a later job. Do not automatically timeout Stopping into a resend-capable state while a receiver result remains outstanding; process restart clears session dispatch without replay.
+
+## Contract: export and cleanup
+
+Add `SlipExporter.kt` and `AndroidSlipExporter.kt` under `data/print/`:
+
+```kotlin
+data class ExportedSlips(val jobId: String, val uris: List<String>)
+interface SlipExporter {
+    suspend fun export(jobId: String, slips: List<PrintSlip>): ExportedSlips
+    suspend fun discardUnshared(batch: ExportedSlips)
+}
+```
+
+The Android implementation accepts Application context and an IO dispatcher. `export` returns exactly one content URI per input slip in input order; empty input, invalid job ID, failed directory creation, false `Bitmap.compress`, or any write/URI error throws an exception rather than returning success. Use `IOException` for IO/false-compress failures, `IllegalArgumentException` for an invalid UUID or empty input, and propagate `CancellationException` unchanged. Inject a small internal `PngEncoder` with `fun encode(bitmap: Bitmap, output: OutputStream): Boolean` for a meaningful false-compress test; its default delegates to PNG compression.
+
+Create only `cacheDir/images/<UUID>/slip_<zero-based-index>.png`; filenames must not depend on card names or wall-clock time. Keep an exporter-owned registry of created batches/directories and validate path ownership before cleanup; `discardUnshared` must reject unknown batches instead of deriving an arbitrary filesystem deletion path from supplied text. Export clears only its own incomplete directory/files after failure or cancellation, including cancellation observed immediately before returning a completed batch. Do not delete successful shared batches when a receiver returns or the user stops remaining slips; another app may still read its granted URI. General cache retention/eviction is outside this PR.
+
+On export completion that the coordinator rejects as stale, call discardUnshared for that exact batch, because it never reached claimLaunch. On cancellation before claimLaunch, discard the owned unshared batch when available. Track whether claimLaunch occurred; after it occurs, retain all batch files for OS cache lifecycle rather than infer which consumer has finished. No blanket `cacheDir/images` cleanup, arbitrary recursive deletion, or immediate URI grant revocation on return.
+
+## Contract: ViewModel integration
+
+Inject `SlipExporter` into `ProxyGeneratorViewModel` with a default Android implementation, preserving existing production constructor calls. Own one coordinator and one export Job in the ViewModel. Replace old `SlipDispatch` state with a `PrintJobState` field named `printJob`; remove the parameterless `onSlipDispatched` API and all callers. Expose wrappers `claimPrintLaunch(token): LaunchRequest?`, `onPrintReturned(token): Unit`, `onPrintLaunchFailed(token, message): Unit`, `sendNextSlip(jobId): Unit`, and `stopPrinting(jobId): Unit` that delegate only to the matching coordinator event.
+
+Keep `printCurrentCard()` and `reprint(entry)` callable as Unit UI callbacks; internally call one `startPrint(slips,label)` path. Enforce latest completed preview/history selection from D8 before calling the coordinator; return immediately for invalid current busy render state or stale history ID with its existing visible error. Synchronously call coordinator.start and update exposed state before launching export, so a second call sees Busy. Busy starts perform no export and do not replace the current job/error. Empty starts perform no export and leave state unchanged.
+
+Capture slips as an immutable list at start; renderer/history changes afterward cannot alter the job's batch. Catch `CancellationException` separately from export failure; an old canceled coroutine cannot set another job's error. Route exceptions only through `exportFailed(jobId, ...)`; rejected stale errors remain ignored. Stop cancels export only when the matching job is Preparing, and performs owned unshared cleanup for other prelaunch cancellation as above. Reflect coordinator state through a single state source/collector without copying an obsolete state captured before suspension.
+
+Disable the current print button and history reprint actions for the coordinator's isBusy set. Preserve the ViewModel guard even when UI actions are disabled. Keep card browsing/tone controls independent; they may change future print candidates but not the already-captured job.
+
+## Contract: Android launch adapter and continuation UI
+
+Add `ui/PrintDispatchHost.kt` and move intent/launcher plumbing out of the large screen into this adapter. Accept the registry from `LocalActivityResultRegistryOwner` by default, with a test-provided `ActivityResultRegistry` seam. Use `ActivityResultContracts.StartActivityForResult()` and key `snapstone-print:<jobId>:<index>` for each token. Register through the overload without LifecycleOwner inside a DisposableEffect and unregister its returned launcher on disposal, as required by D5. The registered callback captures an immutable token and calls `onPrintReturned(token)` for every result code; it must never read the currently active token from mutable state.
+
+Keep registration active for Ready, Launched, and Stopping for the relevant token. Register before attempting launch. In a main-thread side effect after registration, call claimPrintLaunch(token); invoke launcher.launch only when it returns a nonnull request. Claim and launch must be contiguous without a suspending operation between them. On recreation, re-register the same key for the retained ViewModel state but do not reclaim Launched; queued callbacks can be delivered without a second external intent. Handle a callback delivered synchronously during registration by rechecking claim/state before any launch. Process death creates no restored print job; never reconstruct/relaunch it from registry extras or saved bitmap state. New UUID identities prevent stale restored callbacks from matching a new session job.
+
+Build exactly one ACTION_SEND intent per slip: MIME `image/png`, URI in EXTRA_STREAM and ClipData, FLAG_GRANT_READ_URI_PERMISSION, no write grant or file:// URI. Preserve FileProvider authority and cache path configuration. Try the remembered explicit target; synchronous ActivityNotFoundException or SecurityException may fall back once to the chooser for the same token after clearing the stale stored target. Do not treat other exceptions as successful delivery. If both attempts fail, report onPrintLaunchFailed for that token and clear the job through its terminal state; do not retry automatically.
+
+Create chooser PendingIntents explicitly targeting the existing nonexported ChosenComponentReceiver with unique data `snapstone-print-choice:<jobId>:<index>` and FLAG_MUTABLE because the system supplies the chosen component. Do not use one mutable UPDATE_CURRENT PendingIntent shared by different tokens. The receiver persists only the user's selected component and never calls coordinator advancement. Existing preference race hardening beyond isolating PendingIntent identity is outside this PR; choosing an app remains a preference even if the user later stops remaining slips. Check remembered-target launch failures dynamically; activity-presence lookup is only an optimization, not proof it accepts a PNG.
+
+When AwaitingNext, replace the print action with text `Continue with slip N of M?` and buttons exactly `Send next slip` / `Stop`. Do not say the previous slip printed successfully. Both buttons carry the displayed jobId. Back/dismiss of any continuation dialog, if a dialog is used, maps to Stop; prefer an inline PrintBar prompt to survive activity recreation without separate transient flags. In Preparing show `Preparing slips…` and Stop. In Launched show `Sharing slip N of M…`; if Stop is exposed while the app is visible, explain `Stopping after this share returns…` in Stopping and keep new print actions disabled until callback. Completed may say `Sharing finished`; Cancelled clears the active prompt; Failed uses its error text. Never resend the previous slip as the continuation action.
+
+## Bounded implementation passes
+
+### Pass A: coordinator and checked exporter
+
+Hand one executor the pure state types/coordinator plus exporter and their tests. Keep the feature branch open and unmerged until Pass B wires the app. Write coordinator tests in `app/src/test/java/com/example/snapstoneprinter/data/print/PrintJobCoordinatorTest.kt`; write bitmap/filesystem tests in `app/src/androidTest/java/com/example/snapstoneprinter/data/print/AndroidSlipExporterTest.kt`. Run targeted JVM tests locally and hosted exporter instrumentation. No screen/launch changes in this pass.
+
+### Pass B: integration, continuation UI, and callback fixture
+
+Hand the next executor the verified Pass A API and this full document after remeasuring D8. Wire ViewModel/host/PrintBar and remove old dispatch paths; add tests in `ui/PrintDispatchHostTest.kt` and `ui/PrintJobIntegrationTest.kt` under androidTest. Use a controllable fake registry for ordering/recreation and a test receiver for actual external-URI reading. No dependency upgrades, renderer changes, or general target-store refactor.
+
+Add the receiver activity only in `app/src/androidTest/AndroidManifest.xml` with `exported=true`, an explicit component under the test application, and narrowly declared image/png ACTION_SEND test filter, so the production app can exercise delivery across the test-APK boundary. Its test code reads the URI using its own ContentResolver, decodes the PNG, records dimensions/hash/index, and finishes only under test control. It must not be added to the main/release manifest. Verify the release merged manifest omits the fixture and review the test-only exported component explicitly. Do not add a debug-app command endpoint or change production network exposure to seed tests.
+
+## Named tests and assertions
+
+- `startReservesBeforeExport`: two synchronous starts yield Started/Busy and one exporter invocation.
+- `badExportCannotBecomeReady`: wrong URI count, empty list, or blank URI for the active Preparing ID produce Failed; a stale job export returns false unchanged.
+- `claimOnce`: duplicate claim for the same token returns null after the first and launches once.
+- `returnWaitsForChoice`: first return for a multi-slip job produces AwaitingNext and zero next-slip launches until Send next slip.
+- `stopDoesNotSendRemainder`: Stop from AwaitingNext produces Cancelled; delayed sendNext/returned events remain rejected.
+- `allResultCodesUseSameDecision`: RESULT_OK and RESULT_CANCELED both produce the same remaining-slip prompt, with no success-of-print claim.
+- `chooserDismissDoesNotContinue`: dismiss chooser, return, assert no next URI sent until the explicit choice; Stop sends nothing further.
+- `lastReturnCompletesSharing`: last callback terminates without another prompt; no assertion about physical output.
+- `staleAndDuplicateCallbacksDoNotAdvance`: deliver an old token while a newer job/next index is Ready/Launched; new state and launch count unchanged.
+- `stoppingDrainsOutstandingCallback`: Stop while Launched keeps new starts Busy, drains only matching callback, then allows a fresh UUID job.
+- `canceledExportCompletesLate`: controlled exporter ignores cancellation until completion; its batch is discarded as unshared and cannot replace a later job.
+- `compressFalseAndPartialWriteFail`: encoder false and an injected failure after one file both fail export, remove only the owned incomplete files, and preserve a neighboring sentinel file/batch.
+- `successfulBatchRetainedAfterStop`: after claimLaunch, Stop/return do not delete any batch file; receiver can still read its URI.
+- `snapshotDoesNotChangeDuringExport`: tone/history changes while export is suspended do not alter the originally captured slip list/bitmap identities.
+- `activityRecreationDoesNotRelaunch`: registry save/restore and ActivityScenario recreation during outstanding share preserve key/token, accept the callback once, and produce one launch total. Also test callback already queued before re-registration.
+- `newProcessDoesNotReplay`: fresh coordinator with restored registry bundle has no launch; a new UUID job ignores the old key's result.
+- `rememberedTargetFallback`: missing/rejected target triggers one chooser for the same slip and clears stale preference; failed chooser terminates visibly.
+- `externalReceiverReadsCorrectPng`: test APK receives ACTION_SEND image/png, matching EXTRA_STREAM/ClipData, read grant, expected decoded pixels, and slip index order; no second invocation before Send next slip.
+
+Run the full existing JVM/lint/debug build plus hosted connectedDebugAndroidTest after integration; require actual passing reports and APK. Run independent general and separate security reviews before push/merge; security scope includes URI grants, explicit mutable PendingIntent identity, test-only receiver manifest exposure, and owned cleanup paths. Correct only concrete must-fix findings with another executor/reviewer cycle.
+
+## Before/after appendix
+
+Execute this query on the step's actual branch before application changes and after Pass B; record outputs here alongside regression red/green commands, revision/time, and hosted report URLs:
+
+```bash
+git rev-parse HEAD
+rg -n 'fun dispatchSlips|fun onSlipDispatched|fun cancelDispatch|System.currentTimeMillis|\.compress\(|rememberLauncherForActivityResult|chosenComponentSender' app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorViewModel.kt app/src/main/java/com/example/snapstoneprinter/ui/ProxyGeneratorScreen.kt
+rg --files --hidden --glob '!.git/' app/src/main/java/com/example/snapstoneprinter/data/print app/src/androidTest
+git diff --check
+```
+
+Unverified: the executor's pre-change/post-change query and red/green results are not yet run. The planner's D1-D4 commands above inspected baseline source before this design; do not stamp those commands as the later executor's observation.
+
+## Unverified and invariants
+
+D6 is inherited user choice; D7 inherited authorization/emulator routing; D8 inherited prerequisite behavior and must be remeasured before integration. Registry lifecycle, chooser callback order, and separate test-APK URI delivery remain unverified until the named tests execute. Do not infer those outcomes from coordinator tests alone. Preserve single-module architecture, latest-preview history contract, minSdk36, rendered pixels/384 width, one PNG per slip, FileProvider nonexported status, and physical-printer exclusion. Do not add standing undated attention items. Keep one feature PR with reviewable final behavior, refreshed against merged fork master and self-merged only after the run's required checks and reviews.

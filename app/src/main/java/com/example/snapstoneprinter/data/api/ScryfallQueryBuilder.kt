@@ -29,7 +29,7 @@ object ScryfallQueryBuilder {
      */
     fun build(isFunny: Boolean = false): String {
         val terms = mutableListOf(NON_LAND)
-        if (isFunny) terms += FUNNY
+        if (!isFunny) terms += "-$FUNNY"
         terms += EXCLUDE_EXTRAS
         return terms.joinToString(" ")
     }
@@ -46,7 +46,7 @@ object ScryfallQueryBuilder {
             "cmc must be in $MOMIR_VIG_CMC_RANGE, got $cmc"
         }
         val terms = mutableListOf("cmc=$cmc", CREATURE_ONLY)
-        if (isFunny) terms += FUNNY
+        if (!isFunny) terms += "-$FUNNY"
         terms += EXCLUDE_EXTRAS
         return terms.joinToString(" ")
     }
