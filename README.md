@@ -52,12 +52,28 @@ cheap receipt-printer app.
 
 ## Building
 
-```
-./gradlew assembleDebug
+Install a JDK matching `toolchainVersion` in
+[the daemon toolchain file](gradle/gradle-daemon-jvm.properties), and install Android SDK
+Command-Line Tools. Set `JAVA_HOME` to that JDK and `ANDROID_HOME` to the SDK directory;
+add the SDK's `cmdline-tools/latest/bin` directory to your `PATH`.
+
+Install the platform and build-tools packages listed in the `Install Android platform and
+build tools` step of [CI](.github/workflows/ci.yml), and accept their SDK licenses with
+`sdkmanager --licenses`. Consult [the application build file](app/build.gradle.kts) for
+compile, target, and minimum SDK settings. Keep SDK setup aligned with that file when
+updating the toolchain.
+
+Run the same checks locally as CI:
+
+```sh
+./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-Standard Gradle/Android Studio project, single `:app` module. Kotlin + Jetpack Compose (Material
-3), Retrofit + Moshi for the Scryfall client, Coil for image loading, Navigation3 for navigation.
+Allow network access for Gradle dependency resolution. Use the debug APK artifact from a
+successful CI run for installation; inspect its test and lint report artifact for diagnostics.
+See the [validation appendix](docs/migrations/2026-09-15-milestone-1-appendix.md) for measured
+local results and remaining hosted verification. Keep emulator tests and physical printer
+checks as separate validation; this baseline runs JVM unit tests, Android lint, and debug assembly.
 
 ## Status
 

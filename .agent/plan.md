@@ -1,4 +1,13 @@
-# Project Plan
+# Archived project plan
+
+Historical record inherited from baseline `92abee67a84836990538e99f0715a15bd82613ae`,
+archived 2026-09-15. Treat the implementation notes, acceptance criteria, timings, and
+completion claims below as historical observations, not a current task queue or fresh
+validation. Preserve their rationale when changing the related code.
+
+Use the [Milestone 1 migration](../docs/migrations/2026-09-15-milestone-1.md) for the
+current automation scope and its appendix for fresh verification. Consult
+[the historical handoff](../HANDOFF.md) for inherited device checks and followups.
 
 Architecture and Implementation Plan: MTG Thermal Proxy Generator
 
@@ -110,7 +119,7 @@ CARRIED BLOCKER NOW RESOLVED: instrumented tests had never executed (no device).
 - **Duration:** 12m 40s
 
 ### Task_3_Sharing_Integration: Rescoped multi-slip sharing/dispatch. Verify FileProvider wiring in AndroidManifest.xml and res/xml/file_paths.xml (authority ${applicationId}.fileprovider, cache-path 'images/'). Cache EACH slip as its own PNG in cacheDir/images and dispatch each via Intent.ACTION_SEND with MIME image/png and the content URI in EXTRA_STREAM. For two-slip cards fire TWO SEQUENTIAL dispatches (slip 2 only after slip 1 returns) — never ACTION_SEND_MULTIPLE. Persist the printer app ComponentName chosen on the first share (DataStore) and dispatch directly to it afterwards, skipping the chooser, with a visible reset/change-target affordance and graceful fallback to the chooser if the remembered component is uninstalled.
-- **Status:** IN_PROGRESS
+- **Historical status:** formerly in progress; consult the dated handoff before resuming.
 - **Acceptance Criteria:**
   - FileProvider config verified; content URIs generated without FileUriExposedException
   - Each slip cached as its own PNG in cacheDir/images
@@ -123,7 +132,7 @@ CARRIED BLOCKER NOW RESOLVED: instrumented tests had never executed (no device).
 - **StartTime:** 2026-09-14 14:53:57 CDT
 
 ### Task_8_UI_Upgrades: UI upgrades on the existing Compose MVVM screen: contrast and brightness sliders with live thermal preview wired to setContrast/setBrightness/resetToneMapping; a preview toggle switching between the thermal composite and the full-resolution card image (effectiveNormalUrl); multi-slip preview (pager or stacked view) showing both slips for DFCs with a clear indication that two slips will print; and a session history of the last ~20 pulls with reprint, where a history entry may hold multiple slips.
-- **Status:** PENDING
+- **Historical status:** formerly pending; consult the dated handoff before resuming.
 - **Acceptance Criteria:**
   - Contrast/brightness sliders update the thermal preview live; reset restores auto-levels
   - Preview toggle switches between thermal composite and full-res card image
@@ -133,7 +142,7 @@ CARRIED BLOCKER NOW RESOLVED: instrumented tests had never executed (no device).
   - app does not crash
 
 ### Task_9_Housekeeping: Dependency and code housekeeping: remove unused template dependencies (all 4 androidx.camera.*, all 3 Room artifacts, play-services-location, accompanist-permissions, com.google.android.material; keep datastore-preferences if used for the remembered print target), pin dynamic version ranges (1.3.+, 2.11.+, 1.4.+) to concrete versions, gate HttpLoggingInterceptor behind BuildConfig.DEBUG, remove the Context field from ProxyGeneratorViewModel, drop the redundant Moshi KotlinJsonAdapterFactory since codegen KSP is active, and remove unused imports in ProxyGeneratorScreen.kt. minSdk stays 36.
-- **Status:** PENDING
+- **Historical status:** formerly pending; consult the dated handoff before resuming.
 - **Acceptance Criteria:**
   - Listed unused dependencies removed; project still builds
   - Dynamic version ranges pinned to concrete versions
@@ -145,7 +154,7 @@ CARRIED BLOCKER NOW RESOLVED: instrumented tests had never executed (no device).
   - build pass
 
 ### Task_4_Run_and_Verify: critic_agent: build, install and run the app on an API 36 device/emulator and execute the instrumented suite for the first time (./gradlew :app:connectedDebugAndroidTest) plus :app:testDebugUnitTest. Verify stability (no crashes on random pull, non-land pull, is:funny toggle, slider adjustment, preview toggle, history reprint, single and sequential two-slip dispatch), confirm transform/modal_dfc/reversible_card produce two correctly labelled slips while split/flip/adventure produce one, dark art is legible after auto-levels, print dispatch reaches an external app, and the immutable output spec holds (384px width, Floyd-Steinberg, frameless Canvas text, plain-text mana cost, FileProvider + ACTION_SEND image/png, minSdk 36). Report critical UI issues.
-- **Status:** PENDING
+- **Historical status:** formerly pending; consult the dated handoff before resuming.
 - **Acceptance Criteria:**
   - App builds, installs and runs on API 36 without crashes
   - connectedDebugAndroidTest executed and passing
@@ -156,4 +165,3 @@ CARRIED BLOCKER NOW RESOLVED: instrumented tests had never executed (no device).
   - build pass
   - app does not crash
   - Critical UI issues reported
-

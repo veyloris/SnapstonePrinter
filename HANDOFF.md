@@ -1,8 +1,18 @@
 # SnapstonePrinter — Handoff
 
-**Read this first.** A future session has zero memory of how this app got here. Several
-of the decisions below look arbitrary or removable. They are not. Each one is a fix for a
-real, reproduced failure. Undoing them re-breaks the app.
+## Current validation record — 2026-09-15
+
+Use the [Milestone 1 migration](docs/migrations/2026-09-15-milestone-1.md) for the
+authorized automation scope and the [validation appendix](docs/migrations/2026-09-15-milestone-1-appendix.md)
+for commands and measured results. Treat emulator, interactive UI, and physical printer
+observations below as inherited; do not interpret local JVM checks as device verification.
+
+## Historical handoff — inherited 2026-09-14 record
+
+The remaining document is inherited from baseline `92abee67a84836990538e99f0715a15bd82613ae`.
+Treat its status, counts, external-system claims, and reproduction narratives as historical
+observations rather than current verification. Preserve its design rationale and existing
+followups; consult the code and relevant tests before acting on them.
 
 App: Android app that rolls a random Magic: The Gathering card from Scryfall, renders it as
 a 384px-wide 1-bit dithered "proxy slip", and hands it to an external Bluetooth thermal
@@ -12,15 +22,15 @@ Package: `com.example.snapstoneprinter` · Module: `:app` · Single-module Gradl
 
 ---
 
-## 1. Current state
+## 1. Historical state
 
 **Compiles clean.** `:app:assembleDebug` — SUCCESS, no fixes required.
 
 | Check | Result |
 |---|---|
-| `:app:assembleDebug` | ✅ SUCCESS |
-| `:app:testDebugUnitTest` | ✅ **74 passed**, 0 failed, 0 skipped |
-| `:app:connectedDebugAndroidTest` | ✅ **31 passed**, 0 failed (Pixel 10 Pro XL, API 36) |
+| `:app:assembleDebug` | SUCCESS |
+| `:app:testDebugUnitTest` | **74 passed**, 0 failed, 0 skipped |
+| `:app:connectedDebugAndroidTest` | **31 passed**, 0 failed (Pixel 10 Pro XL, API 36) |
 
 Baseline going into the 2026-09-14 session was 67 unit / 31 instrumented (itself up from 63/31);
 this session added 7 more unit tests (5 for `secondaryFaces`, 2 for the named-lookup repository
@@ -214,9 +224,11 @@ it prints twice.
 
 ---
 
-## 5. Known open bugs
+## 5. Historical bug status
 
-None currently open. See §5.1 for the one that was here as of the last handoff — it's fixed.
+Inherited claim from the 2026-09-14 handoff: no bugs were recorded as open; §5.1 described
+the prior art-download finding as resolved. Do not use this historical status as a current
+review verdict.
 
 ### 5.1 RESOLVED — card art missing from slips
 
@@ -244,7 +256,7 @@ host needs this header. It's a per-client requirement, not a one-time intercepto
 
 ---
 
-## 6. Remaining work
+## 6. Historical followups and verification limits
 
 ### Sharing / dispatch
 - ~~Finish the sequential two-slip send.~~ **DONE, verified on-device 2026-09-14** against a real
