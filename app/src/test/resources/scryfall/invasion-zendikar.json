@@ -1,0 +1,33 @@
+{
+  "id": "8fed056f-a8f5-41ec-a7d2-a80a238872d1",
+  "name": "Invasion of Zendikar // Awakened Skyclave",
+  "type_line": "Battle — Siege // Creature — Elemental",
+  "layout": "transform",
+  "card_faces": [
+    {
+      "name": "Invasion of Zendikar",
+      "mana_cost": "{3}{G}",
+      "type_line": "Battle — Siege",
+      "oracle_text": "(As a Siege enters, choose an opponent to protect it. You and others can attack it. When it's defeated, exile it, then cast it transformed.)\nWhen this Siege enters, search your library for up to two basic land cards, put them onto the battlefield tapped, then shuffle.",
+      "defense": "3",
+      "image_uris": {
+        "art_crop": "https://cards.scryfall.io/art_crop/front/8/f/8fed056f-a8f5-41ec-a7d2-a80a238872d1.jpg?1783916973",
+        "normal": "https://cards.scryfall.io/normal/front/8/f/8fed056f-a8f5-41ec-a7d2-a80a238872d1.jpg?1783916973",
+        "large": "https://cards.scryfall.io/large/front/8/f/8fed056f-a8f5-41ec-a7d2-a80a238872d1.jpg?1783916973"
+      }
+    },
+    {
+      "name": "Awakened Skyclave",
+      "mana_cost": "",
+      "type_line": "Creature — Elemental",
+      "oracle_text": "Vigilance, haste\nAs long as this creature is on the battlefield, it's a land in addition to its other types.\n{T}: Add one mana of any color.",
+      "power": "4",
+      "toughness": "4",
+      "image_uris": {
+        "art_crop": "https://cards.scryfall.io/art_crop/back/8/f/8fed056f-a8f5-41ec-a7d2-a80a238872d1.jpg?1783916973",
+        "normal": "https://cards.scryfall.io/normal/back/8/f/8fed056f-a8f5-41ec-a7d2-a80a238872d1.jpg?1783916973",
+        "large": "https://cards.scryfall.io/large/back/8/f/8fed056f-a8f5-41ec-a7d2-a80a238872d1.jpg?1783916973"
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "c8817585-0d32-4d56-9142-0d29512e86a9",
+  "name": "Jace, the Mind Sculptor",
+  "mana_cost": "{2}{U}{U}",
+  "type_line": "Legendary Planeswalker — Jace",
+  "oracle_text": "+2: Look at the top card of target player's library. You may put that card on the bottom of that player's library.\n0: Draw three cards, then put two cards from your hand on top of your library in any order.\n−1: Return target creature to its owner's hand.\n−12: Exile all cards from target player's library, then that player shuffles their hand into their library.",
+  "loyalty": "3",
+  "layout": "normal",
+  "image_uris": {
+    "art_crop": "https://cards.scryfall.io/art_crop/front/c/8/c8817585-0d32-4d56-9142-0d29512e86a9.jpg?1783930196",
+    "normal": "https://cards.scryfall.io/normal/front/c/8/c8817585-0d32-4d56-9142-0d29512e86a9.jpg?1783930196",
+    "large": "https://cards.scryfall.io/large/front/c/8/c8817585-0d32-4d56-9142-0d29512e86a9.jpg?1783930196"
+  }
+}

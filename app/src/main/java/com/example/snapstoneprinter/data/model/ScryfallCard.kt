@@ -14,8 +14,8 @@ data class ImageUris(
 /**
  * A single face of a multi-faced Scryfall card.
  *
- * Transform / modal_dfc / split / flip / adventure layouts return `image_uris` and `oracle_text`
- * as `null` at the top level; the real data lives here inside `card_faces[]`.
+ * Keep each face's printed fields separate from aggregate card fields; see
+ * CardFixturePlanningTest.splitPrimaryDoesNotUseCombinedCostOrType.
  */
 @JsonClass(generateAdapter = true)
 data class CardFace(
@@ -25,7 +25,9 @@ data class CardFace(
     @Json(name = "oracle_text") val oracle_text: String? = null,
     val power: String? = null,
     val toughness: String? = null,
-    @Json(name = "image_uris") val image_uris: ImageUris? = null
+    @Json(name = "image_uris") val image_uris: ImageUris? = null,
+    val loyalty: String? = null,
+    val defense: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -38,7 +40,9 @@ data class ScryfallCard(
     val toughness: String? = null,
     @Json(name = "image_uris") val image_uris: ImageUris? = null,
     @Json(name = "layout") val layout: String? = null,
-    @Json(name = "card_faces") val card_faces: List<CardFace>? = null
+    @Json(name = "card_faces") val card_faces: List<CardFace>? = null,
+    val loyalty: String? = null,
+    val defense: String? = null
 ) {
 
     /** The face we fall back to when a top-level field is absent. Scryfall always orders front-first. */
@@ -50,8 +54,8 @@ data class ScryfallCard(
         get() = !card_faces.isNullOrEmpty()
 
     // ---------------------------------------------------------------------
-    // Effective-value resolvers. Always prefer these over the raw nullable
-    // fields: they transparently fall back to card_faces[0].
+    // Use these for legacy card-level access; use raw face fields when printing
+    // a specific face, as covered by CardFixturePlanningTest.
     // ---------------------------------------------------------------------
 
     val effectiveName: String
@@ -71,6 +75,12 @@ data class ScryfallCard(
 
     val effectiveToughness: String?
         get() = toughness.nullIfBlank() ?: primaryFace?.toughness.nullIfBlank()
+
+    val effectiveLoyalty: String?
+        get() = loyalty.nullIfBlank() ?: primaryFace?.loyalty.nullIfBlank()
+
+    val effectiveDefense: String?
+        get() = defense.nullIfBlank() ?: primaryFace?.defense.nullIfBlank()
 
     /** The art_crop URL used as the source for the dithering pipeline. */
     val effectiveArtCropUrl: String?
