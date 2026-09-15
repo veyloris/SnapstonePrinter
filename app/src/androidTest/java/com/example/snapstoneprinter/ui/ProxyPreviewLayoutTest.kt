@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
@@ -18,6 +19,7 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
@@ -81,6 +83,7 @@ class ProxyPreviewLayoutTest {
                     modifier = Modifier
                         .width(CONTAINER_WIDTH)
                         .height(CONTAINER_HEIGHT)
+                        .testTag("preview-container")
                 ) {
                     ProxyPreview(
                         uiState = ProxyGeneratorUiState(slips = listOf(slip("Test Card"))),
@@ -98,13 +101,17 @@ class ProxyPreviewLayoutTest {
 
         val widthDp = bounds.width.value
         val heightDp = bounds.height.value
+        val containerWidthDp = composeTestRule
+            .onNodeWithTag("preview-container")
+            .getUnclippedBoundsInRoot()
+            .width.value
 
-        // The old bug rendered this at ~128 dp inside a 400 dp container. Anything below 80% of
-        // the container width means the slip stopped filling the width it was handed.
+        assertTrue("container and slip dimensions must be positive", containerWidthDp > 0f && widthDp > 0f && heightDp > 0f)
+        // Compare against allocated width; the device may constrain the requested container size.
         assertTrue(
-            "Slip width was $widthDp dp inside a ${CONTAINER_WIDTH.value} dp container - the " +
+            "Slip width was $widthDp dp inside a $containerWidthDp dp container - the " +
                 "preview is not filling the available width",
-            widthDp >= CONTAINER_WIDTH.value * 0.8f
+            widthDp >= containerWidthDp * 0.8f && widthDp <= containerWidthDp
         )
 
         // Aspect ratio must come from the bitmap, not from the viewport.

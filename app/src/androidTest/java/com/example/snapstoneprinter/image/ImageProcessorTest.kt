@@ -1,7 +1,11 @@
 package com.example.snapstoneprinter.image
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Typeface
+import android.text.StaticLayout
+import android.text.TextPaint
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.snapstoneprinter.data.model.CardFace
 import com.example.snapstoneprinter.data.model.ImageUris
@@ -12,11 +16,156 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.ByteArrayOutputStream
 
 @RunWith(AndroidJUnit4::class)
 class ImageProcessorTest {
+
+    @Test
+    fun prepareArtKeepsBinaryPixelsAndSourceAcrossAspectRatios() {
+        val sizes = listOf(600 to 13, 30 to 80, 3 to 7, 800 to 1, 360 to 9)
+        for ((width, height) in sizes) {
+            val source = gradient(width, height)
+            val original = source.copy(Bitmap.Config.ARGB_8888, false)!!
+            val prepared = ImageProcessor.prepareArt(source)
+
+            assertEquals(360, ImageProcessor.ART_WIDTH)
+            assertEquals(360, prepared.width)
+            assertEquals(maxOf(1, (height.toLong() * 360 / width).toInt()), prepared.height)
+            assertBinary(prepared)
+            assertFalse("preparation must not recycle source $width x $height", source.isRecycled)
+            assertTrue("preparation must not modify source $width x $height", source.sameAs(original))
+        }
+    }
+
+    @Test
+    fun prepareArtResamplesBeforeToneAndDither() {
+        val source = gradient(601, 31)
+        val filtered = Bitmap.createScaledBitmap(source, 360, 18, true)
+        val expected = ImageProcessor.applyFloydSteinbergDithering(filtered, 1.7f, 23f)
+
+        val prepared = ImageProcessor.prepareArt(source, contrast = 1.7f, brightness = 23f)
+
+        assertTrue("tone mapping and dithering must operate on resampled pixels", expected.sameAs(prepared))
+        assertBinary(prepared)
+    }
+
+    @Test
+    fun preparedSourceArtSurvivesCompositionAndPngExactly() {
+        val prepared = ImageProcessor.prepareArt(gradient(601, 31))
+        assertBinary(prepared)
+        val slip = ImageProcessor.composePrintSlips(pixelCard(), listOf(prepared)).single().bitmap
+        assertPatternAndMargins(slip, prepared)
+
+        val png = ByteArrayOutputStream().use { out ->
+            assertTrue(slip.compress(Bitmap.CompressFormat.PNG, 100, out))
+            out.toByteArray()
+        }
+        val decoded = BitmapFactory.decodeByteArray(png, 0, png.size)!!
+        assertPatternAndMargins(decoded, prepared)
+    }
+
+    private fun gradient(width: Int, height: Int): Bitmap =
+        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    val level = (x * 47 + y * 31) % 256
+                    setPixel(x, y, Color.rgb(level, level, level))
+                }
+            }
+        }
+
+    private fun assertBinary(bitmap: Bitmap) {
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        for (pixel in pixels) {
+            assertTrue("prepared pixel must be black or white: $pixel", pixel == Color.BLACK || pixel == Color.WHITE)
+        }
+    }
+
+    @Test
+    fun legacyCompositionRejectsUnpreparedArtWidth() {
+        val exception = assertThrows(IllegalArgumentException::class.java) {
+            ImageProcessor.compositeCardProxy(pixelCard(), checkerboard(600, 7))
+        }
+        assertTrue(exception.message.orEmpty().contains("width"))
+        assertTrue(exception.message.orEmpty().contains("360"))
+    }
+
+    @Test
+    fun cardCompositionRejectsUnpreparedArtWidth() {
+        assertThrows(IllegalArgumentException::class.java) {
+            ImageProcessor.composePrintSlips(pixelCard(), listOf(checkerboard(600, 7)))
+        }
+    }
+
+    @Test
+    fun planCompositionRejectsUnpreparedArtWidth() {
+        assertThrows(IllegalArgumentException::class.java) {
+            ImageProcessor.composeSlips(SlipPlanner.plan(pixelCard()), listOf(checkerboard(600, 7)))
+        }
+    }
+
+    @Test
+    fun preparedPatternSurvivesCompositionAndPngExactly() {
+        val pattern = checkerboard(360, 7)
+        val original = pattern.copy(Bitmap.Config.ARGB_8888, false)!!
+        val slip = ImageProcessor.composePrintSlips(pixelCard(), listOf(pattern)).single().bitmap
+        assertPatternAndMargins(slip, pattern)
+        assertTrue("composition must not modify input art", pattern.sameAs(original))
+        assertFalse("composition must not recycle input art", pattern.isRecycled)
+
+        val png = ByteArrayOutputStream().use { out ->
+            assertTrue(slip.compress(Bitmap.CompressFormat.PNG, 100, out))
+            out.toByteArray()
+        }
+        val decoded = BitmapFactory.decodeByteArray(png, 0, png.size)!!
+        assertPatternAndMargins(decoded, pattern)
+    }
+
+    private fun pixelCard() = ScryfallCard(name = "Art", type_line = "", layout = "normal")
+
+    private fun checkerboard(width: Int, height: Int): Bitmap =
+        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    setPixel(x, y, if ((x + y) % 2 == 0) Color.BLACK else Color.WHITE)
+                }
+            }
+        }
+
+    private fun pixelCardArtTop(): Int {
+        // Match the fixture's specified single title row and empty type row, not image pixels.
+        fun rowHeight(text: String, size: Float, style: Int): Int {
+            val paint = TextPaint().apply {
+                textSize = size
+                typeface = Typeface.create(Typeface.SANS_SERIF, style)
+                isAntiAlias = true
+            }
+            return StaticLayout.Builder.obtain(text, 0, text.length, paint, 360).build().height
+        }
+        return 12 + rowHeight("Art", 24f, Typeface.BOLD) + 8 +
+            rowHeight("", 18f, Typeface.NORMAL) + 12
+    }
+
+    private fun assertPatternAndMargins(slip: Bitmap, pattern: Bitmap) {
+        assertEquals(384, slip.width)
+        val top = pixelCardArtTop()
+        for (y in 0 until pattern.height) {
+            for (x in 0 until slip.width) {
+                val actual = slip.getPixel(x, top + y)
+                val expected = if (x in 12 until 372) pattern.getPixel(x - 12, y) else Color.WHITE
+                assertEquals("art/margin pixel ($x, ${top + y})", expected, actual)
+                assertTrue("art must be binary", actual == Color.BLACK || actual == Color.WHITE)
+            }
+        }
+        for (y in slip.height - 48 until slip.height) {
+            for (x in 0 until slip.width) assertEquals(Color.WHITE, slip.getPixel(x, y))
+        }
+    }
 
     @Test
     fun testApplyFloydSteinbergDithering() {
@@ -129,18 +278,13 @@ class ImageProcessorTest {
         val dummyArt = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
         dummyArt.eraseColor(Color.LTGRAY)
 
-        val composite = ImageProcessor.compositeCardProxy(card, dummyArt)
+        val composite = ImageProcessor.compositeCardProxy(card, ImageProcessor.prepareArt(dummyArt))
         assertNotNull(composite)
         // Immutable spec: output width is always exactly 384 pixels.
         assertEquals(384, composite.width)
         assertEquals(ImageProcessor.OUTPUT_WIDTH, composite.width)
 
-        // Deliberately tightened from the original `> 100`, which was weak enough to pass even if
-        // the art and every line of text had been dropped. The bound below is derived from the
-        // spec rather than guessed: the 100x100 art is scaled to the full content width
-        // (384 - 2*12 padding = 360px) and, being square, contributes 360px of height on its own;
-        // every slip then carries a 48px tear-off feed band. So a correct render cannot be
-        // shorter than 408px plus the title/type/oracle/PT text.
+        // Require room for prepared square art, trailing feed, and the card's text.
         val contentWidth = ImageProcessor.OUTPUT_WIDTH - (12 * 2)
         val scaledArtHeight = contentWidth // square source art
         val minHeight = scaledArtHeight + ImageProcessor.TRAILING_FEED_WHITESPACE_PX
@@ -393,7 +537,7 @@ class ImageProcessorTest {
     private fun art(color: Int, size: Int = 64): Bitmap {
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         bmp.eraseColor(color)
-        return bmp
+        return ImageProcessor.prepareArt(bmp)
     }
 
     private fun transformCard() = ScryfallCard(
