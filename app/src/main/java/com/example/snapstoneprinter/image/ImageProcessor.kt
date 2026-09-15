@@ -164,9 +164,6 @@ object ImageProcessor {
      * No card frames are drawn: the text is rendered natively on Canvas below the dithered art in
      * high-contrast sans-serif on pure white. Mana costs are plain text - no pip symbols.
      *
-     * All card data is read through the `effective*` resolvers so that layouts which carry null
-     * top-level fields (transform / modal_dfc / split / flip) still render. This is the legacy
-     * single-slip path, kept for callers that only ever want one bitmap.
      */
     fun compositeCardProxy(card: ScryfallCard, ditheredArt: Bitmap?): Bitmap {
         requirePreparedArt(ditheredArt)
@@ -217,7 +214,7 @@ object ImageProcessor {
             isAntiAlias = true
         }
 
-        val ptPaint = TextPaint().apply {
+        val statsPaint = TextPaint().apply {
             color = Color.BLACK
             textSize = 20f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
@@ -243,11 +240,13 @@ object ImageProcessor {
             oracleText = content.oracleText,
             power = content.power,
             toughness = content.toughness,
+            loyalty = content.loyalty,
+            defense = content.defense,
             textWidth = textWidth,
             titlePaint = titlePaint,
             typePaint = typePaint,
             oraclePaint = oraclePaint,
-            ptPaint = ptPaint
+            statsPaint = statsPaint
         )
 
         val imgHeight = ditheredArt?.height ?: 0
@@ -267,11 +266,13 @@ object ImageProcessor {
                 oracleText = face.oracleText,
                 power = face.power,
                 toughness = face.toughness,
+                loyalty = face.loyalty,
+                defense = face.defense,
                 textWidth = textWidth,
                 titlePaint = titlePaint,
                 typePaint = typePaint,
                 oraclePaint = oraclePaint,
-                ptPaint = ptPaint
+                statsPaint = statsPaint
             )
             currentY = block.advance(currentY)
             block
@@ -312,22 +313,21 @@ object ImageProcessor {
     }
 
     /**
-     * One face's title/type/oracle/[power-toughness] block: the unit repeated for the primary
-     * face and for every [SecondaryFace] on a split/flip/adventure slip. Kept as measured layouts
-     * so the measure and draw passes can never drift out of sync with each other.
+     * Reuse each face's measured layouts for drawing; CardStatsRenderingTest checks stat ink
+     * and allocated space for primary, secondary, and separate-slip faces.
      */
     private class FaceBlock(
         val titleRow: TitleRow,
         val typeLayout: StaticLayout,
         val oracleLayout: StaticLayout,
-        val ptLayout: StaticLayout?
+        val statsLayout: StaticLayout?
     ) {
         /** Y position after this block, given [extraGap] inserted between the type and oracle text. */
         fun advance(startY: Float, extraGap: Float = 0f): Float {
             var y = startY + titleRow.height + 8f
             y += typeLayout.height + 12f + extraGap
             y += oracleLayout.height
-            if (ptLayout != null) y += 8f + ptLayout.height
+            if (statsLayout != null) y += 8f + statsLayout.height
             return y
         }
 
@@ -358,10 +358,10 @@ object ImageProcessor {
             canvas.withTranslation(padding, y) { oracleLayout.draw(this) }
             y += oracleLayout.height
 
-            if (ptLayout != null) {
+            if (statsLayout != null) {
                 y += 8f
-                canvas.withTranslation(padding, y) { ptLayout.draw(this) }
-                y += ptLayout.height
+                canvas.withTranslation(padding, y) { statsLayout.draw(this) }
+                y += statsLayout.height
             }
             return y
         }
@@ -374,11 +374,13 @@ object ImageProcessor {
         oracleText: String?,
         power: String?,
         toughness: String?,
+        loyalty: String?,
+        defense: String?,
         textWidth: Int,
         titlePaint: TextPaint,
         typePaint: TextPaint,
         oraclePaint: TextPaint,
-        ptPaint: TextPaint
+        statsPaint: TextPaint
     ): FaceBlock {
         val titleRow = buildTitleRow(name, safeManaCost(manaCost), textWidth, titlePaint)
 
@@ -390,16 +392,16 @@ object ImageProcessor {
             .obtain(oracleTextSafe, 0, oracleTextSafe.length, oraclePaint, textWidth)
             .build()
 
-        val ptLayout = if (!power.isNullOrEmpty() && !toughness.isNullOrEmpty()) {
-            val ptText = "$power/$toughness"
-            StaticLayout.Builder.obtain(ptText, 0, ptText.length, ptPaint, textWidth)
+        val statsText = FaceStatsFormatter.format(power, toughness, loyalty, defense).joinToString("\n")
+        val statsLayout = if (statsText.isNotEmpty()) {
+            StaticLayout.Builder.obtain(statsText, 0, statsText.length, statsPaint, textWidth)
                 .setAlignment(Layout.Alignment.ALIGN_OPPOSITE)
                 .build()
         } else {
             null
         }
 
-        return FaceBlock(titleRow, typeLayout, oracleLayout, ptLayout)
+        return FaceBlock(titleRow, typeLayout, oracleLayout, statsLayout)
     }
 
     /**

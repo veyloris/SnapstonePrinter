@@ -65,7 +65,7 @@ The expanded command subsequently exited 0 after formatter and planner implement
 
 ## Remaining verification
 
-**Unverified:** the new `CardStatsRenderingTest` assertions require hosted Android instrumentation. Do not equate compilation or JVM checks with executing Android Canvas rendering. Leave this change unmerged until the hosted test infrastructure and stat tests pass. Physical output remains outside acceptance.
+**Unverified:** successful hosted execution after renderer integration remains required; the red result is recorded below. Do not equate compilation or JVM checks with executing Android Canvas rendering. Leave this change unmerged until the hosted stat tests pass. Physical output remains outside acceptance.
 
 ## After — model/planner stage, 2026-09-15
 
@@ -85,7 +85,7 @@ app/src/main/java/com/example/snapstoneprinter/image/SlipPlanner.kt:58:    val l
 app/src/main/java/com/example/snapstoneprinter/image/SlipPlanner.kt:59:    val defense: String? = null
 ```
 
-**Inherited execution boundary:** the main thread instructed the executor on 2026-09-15 to defer renderer implementation until the hosted stats regressions run red. Keep the current renderer unchanged until that observation; `CardStatsRenderingTest` was authored first and still requires execution.
+**Inherited execution boundary, now satisfied by the red report below:** the main thread instructed the executor on 2026-09-15 to defer renderer implementation until the hosted stats regressions ran red.
 
 The local pre-renderer acceptance command on 2026-09-15 exited 0:
 
@@ -103,4 +103,52 @@ app/build/outputs/apk/debug/app-debug.apk: 66870422 bytes
 app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk: 2355432 bytes
 ```
 
-These observations came from parsing the unit/lint XML reports and inspecting the generated APKs at the execution base plus staged changes. `git diff HEAD -- app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt` returned no output, confirming the renderer remains at its pre-change state for the hosted red run. `git diff --cached --check` and `git diff --check HEAD` passed after staging the evidence record on 2026-09-15. Instrumentation APK assembly certifies compilation and packaging only; renderer regression execution remains pending.
+These observations came from parsing the unit/lint XML reports and inspecting the generated APKs at the execution base plus staged changes. At that pre-renderer observation, `git diff HEAD -- app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt` returned no output. `git diff --cached --check` and `git diff --check HEAD` passed after staging the evidence record on 2026-09-15. Instrumentation APK assembly certifies compilation and packaging only; use the hosted observations below for renderer execution.
+
+## Hosted renderer red and resumed implementation
+
+The executor inspected the downloaded XML artifact from [Android test run 35003772735](https://github.com/veyloris/SnapstonePrinter/actions/runs/35003772735) before editing the renderer. Its timestamp `2026-09-15T17:54:41` records:
+
+```text
+Overall: tests=42 failures=3 errors=0 skipped=0
+CardStatsRenderingTest: tests=4 failures=3 errors=0 skipped=0
+absentStatsHaveNoAllocatedOrDrawnLine: passed
+primaryStatsAllocateAndDrawEachKind: failed
+multiSlipStatsStayOnOwningFace: failed
+secondaryStatsAllocateAndDrawEachKind: failed
+Each failure: java.lang.AssertionError: A stat line must receive vertical space
+```
+
+At resumption, `git rev-parse HEAD` returned `1d49f024e76f29d4c09286655def561fe0645ada` and `git status --short` returned no changes. The repeatable source query returned the same model/planner fields recorded above and no `FaceStatsFormatter.format` call in ImageProcessor. The merged renderer's `prepareArt`, prepared-width check, and native art drawing were inspected before edits; keep those outside the stats diff.
+
+The renderer change supplies primary and secondary loyalty/defense to the formatter and uses its newline-joined output in the same StaticLayout for measuring and drawing. `CardStatsRenderingTest` remains unchanged from the observed failing run.
+
+After that change, the repeatable source query returned:
+
+```text
+1d49f024e76f29d4c09286655def561fe0645ada
+app/src/main/java/com/example/snapstoneprinter/image/ImageProcessor.kt:395:        val statsText = FaceStatsFormatter.format(power, toughness, loyalty, defense).joinToString("\n")
+app/src/main/java/com/example/snapstoneprinter/data/model/ScryfallCard.kt:29:    val loyalty: String? = null,
+app/src/main/java/com/example/snapstoneprinter/data/model/ScryfallCard.kt:30:    val defense: String? = null
+app/src/main/java/com/example/snapstoneprinter/data/model/ScryfallCard.kt:44:    val loyalty: String? = null,
+app/src/main/java/com/example/snapstoneprinter/data/model/ScryfallCard.kt:45:    val defense: String? = null
+app/src/main/java/com/example/snapstoneprinter/data/model/ScryfallCard.kt:79:    val effectiveLoyalty: String?
+app/src/main/java/com/example/snapstoneprinter/data/model/ScryfallCard.kt:82:    val effectiveDefense: String?
+app/src/main/java/com/example/snapstoneprinter/image/SlipPlanner.kt:39:    val loyalty: String? = null,
+app/src/main/java/com/example/snapstoneprinter/image/SlipPlanner.kt:40:    val defense: String? = null
+app/src/main/java/com/example/snapstoneprinter/image/SlipPlanner.kt:58:    val loyalty: String? = null,
+app/src/main/java/com/example/snapstoneprinter/image/SlipPlanner.kt:59:    val defense: String? = null
+```
+
+The same full local JVM/lint/debug/instrumentation-assembly command exited 0 after renderer integration:
+
+```text
+BUILD SUCCESSFUL in 23s
+Unit XML timestamps: 2026-09-15T17:56:27.269Z through 2026-09-15T17:56:27.493Z
+Unit XML totals: tests=95 failures=0 errors=0 skipped=0
+Lint XML: errors/fatal=0 warnings=58
+app/build/outputs/apk/debug/app-debug.apk: 67217788 bytes
+app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk: 2388077 bytes
+```
+
+`git diff --cached --check` and `git diff --check HEAD` passed after staging the renderer and updated evidence on 2026-09-15. These local results establish JVM behavior and Android test compilation; the successful hosted renderer rerun and independent review remain outstanding.
