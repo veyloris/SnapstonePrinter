@@ -42,10 +42,11 @@ public final class PrintReceiverActivity extends Activity {
         column.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         Button reread = new Button(this);
         reread.setText("Read URI again");
+        reread.setContentDescription("print-receiver-reread");
         reread.setOnClickListener(view -> receiptView.setText(readReceipt(getIntent()).toString()));
         column.addView(reread, buttonLayout());
-        addReturnButton(column, "Return OK", RESULT_OK);
-        addReturnButton(column, "Return Cancel", RESULT_CANCELED);
+        addReturnButton(column, "Return OK", "print-receiver-return-ok", RESULT_OK);
+        addReturnButton(column, "Return Cancel", "print-receiver-return-cancel", RESULT_CANCELED);
         setContentView(column);
     }
 
@@ -53,9 +54,10 @@ public final class PrintReceiverActivity extends Activity {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
-    private void addReturnButton(LinearLayout column, String label, int result) {
+    private void addReturnButton(LinearLayout column, String label, String accessibilityId, int result) {
         Button button = new Button(this);
         button.setText(label);
+        button.setContentDescription(accessibilityId);
         button.setOnClickListener(view -> {
             setResult(result);
             finish();

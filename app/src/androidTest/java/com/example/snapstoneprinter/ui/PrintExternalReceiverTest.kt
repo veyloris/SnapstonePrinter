@@ -91,7 +91,7 @@ class PrintExternalReceiverTest {
                     val job = vm.uiState.value.printJob
                     job is PrintJobState.Launched && job.index == index
                 }
-                val receipt = JSONObject(awaitNode { it.contentDescription == "print-receiver-receipt" }.text.toString())
+                val receipt = JSONObject(awaitNode { it.contentDescription?.toString() == "print-receiver-receipt" }.text.toString())
                 assertTrue(receipt.toString(), receipt.isNull("error"))
                 assertEquals("android.intent.action.SEND", receipt.getString("action"))
                 assertEquals("image/png", receipt.getString("mime"))
@@ -110,7 +110,7 @@ class PrintExternalReceiverTest {
                     val recreatedHost = recreateBehindReceiver(originalHost, retained)
                     assertNotSame(originalHost, recreatedHost)
                     val afterRecreation = JSONObject(awaitNode {
-                        it.contentDescription == "print-receiver-receipt"
+                        it.contentDescription?.toString() == "print-receiver-receipt"
                     }.text.toString())
                     assertEquals(receipt.getString("activityInstance"), afterRecreation.getString("activityInstance"))
                     assertEquals(token, (vm.uiState.value.printJob as PrintJobState.Launched).token)
@@ -121,10 +121,10 @@ class PrintExternalReceiverTest {
                         assertTrue(vm.uiState.value.printJob is PrintJobState.Stopping)
                         assertFalse(vm.tryReprint(vm.uiState.value.history.single()))
                     }
-                    assertTrue(awaitNode { it.text == "Read URI again" }
+                    assertTrue(awaitNode { it.contentDescription?.toString() == "print-receiver-reread" }
                         .performAction(AccessibilityNodeInfo.ACTION_CLICK))
                     val reread = JSONObject(awaitNode {
-                        it.contentDescription == "print-receiver-receipt" &&
+                        it.contentDescription?.toString() == "print-receiver-receipt" &&
                             JSONObject(it.text.toString()).getInt("readCount") == 2
                     }.text.toString())
                     assertTrue(reread.toString(), reread.isNull("error"))
@@ -134,20 +134,21 @@ class PrintExternalReceiverTest {
                     assertEquals(3, reread.getInt("width"))
                     assertEquals(2, reread.getInt("height"))
                 }
-                assertTrue(awaitNode { it.text == if (index == 0) "Return Cancel" else "Return OK" }
+                val returnId = if (index == 0) "print-receiver-return-cancel" else "print-receiver-return-ok"
+                assertTrue(awaitNode { it.contentDescription?.toString() == returnId }
                     .performAction(AccessibilityNodeInfo.ACTION_CLICK))
                 if (index == 0) {
                     compose.onNodeWithText("Continue with slip 2 of 2?").assertExists()
                     compose.runOnIdle { assertTrue(vm.uiState.value.printJob is PrintJobState.AwaitingNext) }
                     assertNull(node(instrumentation.uiAutomation.rootInActiveWindow) {
-                        it.contentDescription == "print-receiver-receipt"
+                        it.contentDescription?.toString() == "print-receiver-receipt"
                     })
                     compose.onNodeWithText("Send next slip").performClick()
                 }
             }
             compose.waitUntil { vm.uiState.value.printJob is PrintJobState.Cancelled }
         } finally {
-            node(instrumentation.uiAutomation.rootInActiveWindow) { it.text == "Return Cancel" }
+            node(instrumentation.uiAutomation.rootInActiveWindow) { it.contentDescription?.toString() == "print-receiver-return-cancel" }
                 ?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             runBlocking { PrinterTargetStore.forget(application) }
         }
@@ -212,7 +213,24 @@ class PrintExternalReceiverTest {
             node(InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow, predicate)?.let { return it }
             SystemClock.sleep(50)
         }
-        throw AssertionError("Expected receiver accessibility node within 15 seconds")
+        val tree = accessibilityTree(InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow)
+        throw AssertionError("Expected receiver accessibility node within 15 seconds. Active tree:\n$tree")
+    }
+    private fun accessibilityTree(root: AccessibilityNodeInfo?): String {
+        val output = StringBuilder()
+        var remaining = 80
+        fun append(node: AccessibilityNodeInfo?, depth: Int) {
+            if (node == null || remaining-- <= 0 || depth > 15) return
+            output.append(" ".repeat(depth)).append(node.className)
+                .append(" package=").append(node.packageName)
+                .append(" description=").append(node.contentDescription?.toString()?.take(160))
+                .append(" text=").append(node.text?.toString()?.take(160))
+                .append(" clickable=").append(node.isClickable)
+                .append(" visible=").append(node.isVisibleToUser).append('\n')
+            for (index in 0 until node.childCount) append(node.getChild(index), depth + 1)
+        }
+        append(root, 0)
+        return output.toString().ifEmpty { "<no active root>" }
     }
     private fun node(root: AccessibilityNodeInfo?, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
         if (root == null) return null
