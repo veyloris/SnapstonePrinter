@@ -1,0 +1,50 @@
+name: Dependency submission
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-submission:
+    name: Record Gradle dependencies
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: '15859902'
+          log-accepted-android-sdk-licenses: false
+
+      - name: Install Android platform and build tools
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+
+      - name: Generate and submit dependency graph
+        uses: gradle/actions/dependency-submission@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+        with:
+          dependency-graph: generate-submit-and-upload
+          artifact-retention-days: 14
+          build-scan-publish: false
+          validate-wrappers: true
+          additional-arguments: --no-daemon --no-configuration-cache
+          dependency-graph-continue-on-failure: false

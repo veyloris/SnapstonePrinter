@@ -1,0 +1,57 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "forkProcessing": "enabled",
+  "dependencyDashboard": false,
+  "enabledManagers": ["gradle", "gradle-wrapper", "github-actions"],
+  "automerge": false,
+  "timezone": "America/Chicago",
+  "schedule": ["* 0-6 * * 1"],
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "matchPackageNames": ["org.jetbrains.kotlin:*", "org.jetbrains.kotlin.plugin.*:*", "com.google.devtools.ksp:*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Kotlin compiler plugins and KSP"
+    },
+    {
+      "matchPackageNames": ["androidx.compose:*", "androidx.compose.*:*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Compose"
+    },
+    {
+      "matchPackageNames": ["androidx.lifecycle:*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "AndroidX lifecycle"
+    },
+    {
+      "matchPackageNames": ["org.jetbrains.kotlinx:kotlinx-coroutines-*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Kotlin coroutines"
+    },
+    {
+      "matchPackageNames": ["com.squareup.retrofit2:*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Retrofit"
+    },
+    {
+      "matchPackageNames": ["com.squareup.okhttp3:*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "OkHttp"
+    },
+    {
+      "matchPackageNames": ["com.squareup.moshi:*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Moshi"
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "groupName": null
+    }
+  ]
+}
