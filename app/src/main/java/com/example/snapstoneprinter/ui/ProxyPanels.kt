@@ -427,7 +427,8 @@ fun HistorySheet(
     history: List<HistoryEntry>,
     onReprint: (HistoryEntry) -> Unit,
     onDismiss: () -> Unit,
-    error: String? = null
+    error: String? = null,
+    isPrinting: Boolean = false
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -464,7 +465,7 @@ fun HistorySheet(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(history, key = { it.id }) { entry ->
-                        HistoryRow(entry = entry, onReprint = { onReprint(entry) })
+                        HistoryRow(entry = entry, onReprint = { onReprint(entry) }, enabled = !isPrinting)
                     }
                 }
             }
@@ -473,7 +474,7 @@ fun HistorySheet(
 }
 
 @Composable
-private fun HistoryRow(entry: HistoryEntry, onReprint: () -> Unit) {
+private fun HistoryRow(entry: HistoryEntry, onReprint: () -> Unit, enabled: Boolean) {
     val bitmap = entry.slips.firstOrNull()?.bitmap
     val thumbnail = remember(bitmap) { bitmap?.asImageBitmap() }
 
@@ -521,7 +522,7 @@ private fun HistoryRow(entry: HistoryEntry, onReprint: () -> Unit) {
             )
         }
         Spacer(Modifier.width(8.dp))
-        FilledTonalButton(onClick = onReprint, modifier = Modifier.heightIn(min = 48.dp)) {
+        FilledTonalButton(onClick = onReprint, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) {
             Icon(Icons.Rounded.Print, contentDescription = null)
             Spacer(Modifier.width(6.dp))
             Text("Reprint")

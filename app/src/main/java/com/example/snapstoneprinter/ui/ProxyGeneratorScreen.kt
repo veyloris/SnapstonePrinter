@@ -1,13 +1,7 @@
 package com.example.snapstoneprinter.ui
 
-import android.app.PendingIntent
-import android.content.ActivityNotFoundException
-import android.content.ClipData
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import com.example.snapstoneprinter.data.print.PrintJobState
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,7 +39,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,7 +46,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.example.snapstoneprinter.data.print.ChosenComponentReceiver
 import com.example.snapstoneprinter.image.PrintSlip
 
 /**
@@ -89,7 +81,6 @@ fun ProxyGeneratorScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
 
     var showToneSheet by remember { mutableStateOf(false) }
     var showHistorySheet by remember { mutableStateOf(false) }
@@ -110,50 +101,7 @@ fun ProxyGeneratorScreen(
     // actually looking at in the pager.
     val pagerState = rememberPagerState(pageCount = { uiState.slips.size })
 
-    // ONE dispatch at a time. The result callback is what advances to the next slip, so slip 2 of
-    // a transform card physically cannot leave before slip 1's share activity has returned.
-    val dispatchLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        viewModel.onSlipDispatched()
-    }
-
-    val dispatch = uiState.dispatch
-    LaunchedEffect(dispatch?.requestId, dispatch?.index) {
-        val job = dispatch ?: return@LaunchedEffect
-        val send = buildSendIntent(job.current)
-
-        // Straight to the remembered printer app when it is still installed; otherwise the
-        // chooser, wired up so we learn what the user picks.
-        val storedTarget = uiState.printerTarget
-        val remembered = storedTarget?.takeIf { viewModel.isTargetUsable(it) }
-        val launched = if (remembered != null) {
-            runCatching {
-                dispatchLauncher.launch(Intent(send).setComponent(remembered.component))
-            }.isSuccess
-        } else {
-            false
-        }
-
-        if (!launched) {
-            // Forget a stale target whether it failed the isTargetUsable check up front (the
-            // app was uninstalled) or passed that check but still failed to actually launch -
-            // either way the persisted target is dead and the overflow menu must stop lying
-            // about it being set.
-            if (storedTarget != null) viewModel.forgetPrinterTarget()
-            try {
-                dispatchLauncher.launch(
-                    Intent.createChooser(
-                        send,
-                        "Print slip ${job.index + 1} of ${job.total} \u2014 ${job.label}",
-                        chosenComponentSender(context)
-                    )
-                )
-            } catch (e: ActivityNotFoundException) {
-                viewModel.cancelDispatch("No app on this device can receive a PNG.")
-            }
-        }
-    }
+    PrintDispatchHost(viewModel)
 
     Scaffold(
         topBar = {
@@ -174,7 +122,9 @@ fun ProxyGeneratorScreen(
         bottomBar = {
             PrintBar(
                 uiState = uiState,
-                onPrint = viewModel::printCurrentCard
+                onPrint = viewModel::printCurrentCard,
+                onSendNext = viewModel::sendNextSlip,
+                onStop = viewModel::stopPrinting
             )
         },
         modifier = modifier
@@ -283,7 +233,8 @@ fun ProxyGeneratorScreen(
                 }
             },
             onDismiss = { historyError = null; showHistorySheet = false },
-            error = historyError
+            error = historyError,
+            isPrinting = uiState.printJob.isBusy
         )
     }
 
@@ -311,33 +262,6 @@ fun ProxyGeneratorScreen(
         )
     }
 }
-
-/**
- * A single-image `ACTION_SEND`.
- *
- * NEVER `ACTION_SEND_MULTIPLE`: the cheap Bluetooth thermal printer apps this targets either print
- * only the first stream or interleave them. Two slips means two of these, in sequence.
- */
-private fun buildSendIntent(uri: Uri): Intent = Intent(Intent.ACTION_SEND).apply {
-    type = "image/png"
-    putExtra(Intent.EXTRA_STREAM, uri)
-    // clipData carries the grant for receivers that read it instead of EXTRA_STREAM.
-    clipData = ClipData.newRawUri("Proxy slip", uri)
-    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-}
-
-/**
- * The chooser-result callback. This is the ONLY supported way to find out which app the user
- * picked; `startActivityForResult` on a chooser does not tell you.
- *
- * Must be `FLAG_MUTABLE` - the system fills in `EXTRA_CHOSEN_COMPONENT` itself.
- */
-private fun chosenComponentSender(context: Context) = PendingIntent.getBroadcast(
-    context,
-    0,
-    Intent(context, ChosenComponentReceiver::class.java),
-    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-).intentSender
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -537,9 +461,11 @@ private fun PreviewModeToggle(
  * For a double-faced card this queues BOTH slips; they leave one after the other.
  */
 @Composable
-private fun PrintBar(
+internal fun PrintBar(
     uiState: ProxyGeneratorUiState,
-    onPrint: () -> Unit
+    onPrint: () -> Unit,
+    onSendNext: (String) -> Unit,
+    onStop: (String) -> Unit
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -551,13 +477,34 @@ private fun PrintBar(
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            uiState.dispatch?.let { job ->
-                Text(
-                    text = "Sending slip ${job.index + 1} of ${job.total}\u2026",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
+            val job = uiState.printJob
+            val status = when (job) {
+                is PrintJobState.Preparing -> "Preparing slips…"
+                is PrintJobState.Ready -> "Preparing slip ${job.index + 1} of ${job.total}…"
+                is PrintJobState.Launched -> "Sharing slip ${job.index + 1} of ${job.total}…"
+                is PrintJobState.AwaitingNext -> "Continue with slip ${job.index + 2} of ${job.total}?"
+                is PrintJobState.Stopping -> "Stopping after this share returns…"
+                is PrintJobState.Completed -> "Sharing finished"
+                is PrintJobState.Failed -> job.message
+                else -> null
+            }
+            status?.let {
+                Text(it, style = MaterialTheme.typography.labelMedium,
+                    color = if (job is PrintJobState.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 6.dp))
+            }
+            if (job is PrintJobState.AwaitingNext) {
+                Button(onClick = { onSendNext(job.jobId) }, modifier = Modifier.fillMaxWidth()) { Text("Send next slip") }
+            }
+            val stoppableId = when (job) {
+                is PrintJobState.Preparing -> job.jobId
+                is PrintJobState.Ready -> job.jobId
+                is PrintJobState.Launched -> job.jobId
+                is PrintJobState.AwaitingNext -> job.jobId
+                else -> null
+            }
+            stoppableId?.let { id ->
+                TextButton(onClick = { onStop(id) }, modifier = Modifier.fillMaxWidth()) { Text("Stop") }
             }
             uiState.artError?.let { message ->
                 Text(
@@ -571,7 +518,7 @@ private fun PrintBar(
             }
             Button(
                 onClick = onPrint,
-                enabled = uiState.canPrint && uiState.dispatch == null,
+                enabled = uiState.canPrint && !uiState.printJob.isBusy,
                 shape = MaterialTheme.shapes.extraLarge,
                 contentPadding = PaddingValues(20.dp),
                 modifier = Modifier
