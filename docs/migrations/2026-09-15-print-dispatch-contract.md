@@ -1,6 +1,6 @@
 # Print dispatch: explicit continuation and request ownership
 
-Created: 2026-09-15. State: notstarted (executor contract).
+Created: 2026-09-15. State: started (Pass A); see the companion coordinator evidence record for local verification and pending hosted/integration checks.
 
 ## Premises
 
@@ -12,6 +12,7 @@ Created: 2026-09-15. State: notstarted (executor contract).
 - **Inherited D6:** user explicitly chose `Ask “Send next slip” / “Stop”` on 2026-09-15. This resolves the main roadmap's prior dispatch decision gate.
 - **Inherited D7:** the main thread authorized self-merging reviewed, passing fork PRs for the continuing run; upstream writes and physical devices/printers remain excluded. Use hosted API36 instrumentation introduced by the renderer step.
 - **Inherited D8:** the history step will provide the latest completed slip snapshot and reject stale/evicted history IDs. Re-read its merged interfaces before wiring print entry points; preserve that contract.
+- **Measured D9:** `git rev-parse HEAD` in `/home/veyloris/git/SnapstonePrinter-worktrees/print-coordinator` returned `6f82f7893c8cddf5a1f91fbd4780803de0fccfdb` on 2026-09-15; this contract amendment precedes its Pass A implementation. Recheck the stated source premises in this checkout before implementing the adapters.
 
 ## Decision and rejected alternatives
 
@@ -48,7 +49,7 @@ class PrintJobCoordinator(idFactory: () -> String = { UUID.randomUUID().toString
 }
 ```
 
-Require nonblank job IDs and nonnegative token indices when constructing tokens; factory output must be nonblank and never reused within a coordinator, otherwise throw `IllegalStateException` before entering a job. `start(total < 0)` throws `IllegalArgumentException`; `start(total == 0)` returns Empty unchanged. Check Busy first for positive totals. Every false Boolean and null launch result means the event was rejected and state is unchanged. Never represent rejected export as a valid empty URI batch.
+Require canonical UUID job IDs and nonnegative token indices when constructing tokens; factory output must parse as a UUID, equal its canonical `toString()`, and never be reused within a coordinator, otherwise throw `IllegalStateException` before entering a job. Use fixed valid UUIDs in tests rather than a permissive test-only identity format; the coordinator and Android exporter must accept the same ID set. `start(total < 0)` throws `IllegalArgumentException`; `start(total == 0)` returns Empty unchanged. Check Busy first for positive totals. Every false Boolean and null launch result means the event was rejected and state is unchanged. A true exported result means the event was handled, not necessarily that the batch was admitted: invalid active payloads enter Failed as specified below.
 
 Define sealed `PrintJobState` variants exactly: `Idle`; `Preparing(jobId,label,total)`; `Ready(jobId,label,uris,index)`; `Launched(jobId,label,uris,index)`; `AwaitingNext(jobId,label,uris,index)` where index denotes the last returned slip; `Stopping(jobId,label,uris,index)` for an outstanding launched callback; `Completed(jobId)`; `Cancelled(jobId)`; `Failed(jobId,message)`. State URI lists are copied on admission and have exactly total nonblank elements; use private construction/helper validation for indexed states. Derive total from list size after export and derive token from jobId/index. Derive `isBusy` from allowed set `{Preparing,Ready,Launched,AwaitingNext,Stopping}`; terminal states permit a new start and retain only the latest outcome, not URI lists.
 
@@ -87,7 +88,9 @@ The Android implementation accepts Application context and an IO dispatcher. `ex
 
 Create only `cacheDir/images/<UUID>/slip_<zero-based-index>.png`; filenames must not depend on card names or wall-clock time. Keep an exporter-owned registry of created batches/directories and validate path ownership before cleanup; `discardUnshared` must reject unknown batches instead of deriving an arbitrary filesystem deletion path from supplied text. Export clears only its own incomplete directory/files after failure or cancellation, including cancellation observed immediately before returning a completed batch. Do not delete successful shared batches when a receiver returns or the user stops remaining slips; another app may still read its granted URI. General cache retention/eviction is outside this PR.
 
-On export completion that the coordinator rejects as stale, call discardUnshared for that exact batch, because it never reached claimLaunch. On cancellation before claimLaunch, discard the owned unshared batch when available. Track whether claimLaunch occurred; after it occurs, retain all batch files for OS cache lifecycle rather than infer which consumer has finished. No blanket `cacheDir/images` cleanup, arbitrary recursive deletion, or immediate URI grant revocation on return.
+Before admitting export completion, compare `batch.jobId` with the immutable expected jobId captured when export began. A mismatch is an exporter-contract failure: do not pass its URIs to `coordinator.exported(expectedId, ...)`; call `exportFailed(expectedId, "Could not prepare images for this print job.")`, which is ignored if expectedId is stale. Do not call discardUnshared on the mismatched payload or derive deletion paths from its ID, because it could name another job's shared batch. Log that contract violation; the production exporter must satisfy identity equality, and cleanup of its own interrupted writes remains its responsibility.
+
+For a matching-ID batch, call `exported(expectedId, batch.uris)` and retain it only if the resulting state is Ready for that expectedId. Otherwise discard that exact owned, never-shared batch: this includes a false stale-event result AND a true handled-invalid result that entered Failed. Do not use the Boolean alone as the ownership/admission decision. Validate the exporter registry's exact batch identity before deletion; unknown/forged batch objects fail closed with no deletion. On cancellation before claimLaunch, discard the owned unshared batch when available. Track whether claimLaunch occurred; after it occurs, retain all batch files for OS cache lifecycle rather than infer which consumer has finished. No blanket cache-directory cleanup, arbitrary recursive deletion, or immediate URI grant revocation on return. Perform cancellation cleanup in a bounded NonCancellable IO context so cancellation does not skip owned-file cleanup.
 
 ## Contract: ViewModel integration
 
@@ -127,6 +130,9 @@ Add the receiver activity only in `app/src/androidTest/AndroidManifest.xml` with
 
 - `startReservesBeforeExport`: two synchronous starts yield Started/Busy and one exporter invocation.
 - `badExportCannotBecomeReady`: wrong URI count, empty list, or blank URI for the active Preparing ID produce Failed; a stale job export returns false unchanged.
+- `handledInvalidBatchIsDiscarded`: a matching-ID owned batch with invalid URI count/blank entry is handled true into Failed, then discarded once and never stored/launched; preserve neighboring and previously shared batches.
+- `mismatchedExportIdentityCannotBeRelabeled`: a fake exporter returns another job's ID; fail only the expected currently preparing job, admit no URIs, and do not discard the foreign payload. If the expected job is already stale, leave the new active job unchanged.
+- `invalidFactoryIdentityRejectedBeforePreparation`: blank, malformed, noncanonical, and reused UUID factory results fail before state change; fixed valid UUIDs pass both coordinator and exporter identity validation.
 - `claimOnce`: duplicate claim for the same token returns null after the first and launches once.
 - `returnWaitsForChoice`: first return for a multi-slip job produces AwaitingNext and zero next-slip launches until Send next slip.
 - `stopDoesNotSendRemainder`: Stop from AwaitingNext produces Cancelled; delayed sendNext/returned events remain rejected.
