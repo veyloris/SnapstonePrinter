@@ -75,6 +75,23 @@ See the [validation appendix](docs/migrations/2026-09-15-milestone-1-appendix.md
 local results and remaining hosted verification. Keep emulator tests and physical printer
 checks as separate validation; this baseline runs JVM unit tests, Android lint, and debug assembly.
 
+## Dependency maintenance
+
+Review update policy in [renovate.json](renovate.json), the authoritative configuration
+for scheduling, package families, and PR limits. Require the CI baseline before adopting
+dependency updates, and review and merge each update manually.
+
+Grant the Renovate GitHub App access to the repository and land the configuration on its
+default branch to enable processing, including this fork's explicit opt-in. Do not treat a
+committed configuration or a successful validator run as installation or activation of the
+app. See [Renovate's fork configuration](https://docs.renovatebot.com/configuration-options/#forkprocessing).
+
+Use [dependency submission](.github/workflows/dependency-submission.yml) to populate GitHub's
+dependency graph from Gradle resolution, so vulnerability alerts can use resolved dependencies.
+Inspect its graph artifact and submission result after the first default-branch run; configuration
+validation alone does not establish dependency coverage. Keep this recording job advisory and
+restricted to the default branch, with write permission confined to its job.
+
 ## Status
 
 A hobby project under active, casual development — not published to the Play Store, no guarantees
